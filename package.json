@@ -2,20 +2,29 @@
   "name": "managed-worktree-system",
   "private": true,
   "version": "0.1.0",
-  "description": "Design and implementation home for a managed Git worktree system for parallel human and AI work.",
+  "type": "module",
+  "description": "Managed Git worktree CLI for parallel human and AI task work with a clean seed checkout.",
+  "bin": {
+    "mwt": "./src/cli.mjs"
+  },
   "scripts": {
-    "lint": "markdownlint \"**/*.md\" --ignore node_modules",
-    "test": "node scripts/test.mjs",
-    "build": "compose-agentsmd",
-    "verify": "npm run lint && npm run test && npm run build",
-    "format": "prettier --write ."
+    "lint:docs": "npm exec -- markdownlint \"**/*.md\" --ignore node_modules",
+    "lint:js": "npm exec -- eslint .",
+    "lint": "npm run lint:docs && npm run lint:js",
+    "audit": "npm audit --audit-level=moderate",
+    "test": "node --test",
+    "build": "npm exec -- compose-agentsmd",
+    "verify": "npm run lint && npm run test && npm run audit && npm run build",
+    "format": "npm exec -- prettier --write ."
   },
   "devDependencies": {
     "compose-agentsmd": "^6.0.0",
+    "eslint": "^9.39.0",
     "markdownlint-cli": "^0.48.0",
     "prettier": "^3.6.2"
   },
-  "overrides": {
-    "smol-toml": "1.6.1"
+  "dependencies": {
+    "minimatch": "^10.1.1",
+    "smol-toml": "^1.6.1"
   }
 }

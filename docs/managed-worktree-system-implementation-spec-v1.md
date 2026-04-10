@@ -532,7 +532,7 @@ Behavior:
 5. Create `.mwt/` directories.
 6. Create `.mwt/config.toml` if absent.
 7. Create the seed `.mwt-worktree.json`.
-8. Create ignored state/log paths and update `.gitignore` if required.
+8. Create ignored state/log paths and update local Git exclude rules if required.
 9. Record `seed.json`.
 
 Failure rule:
@@ -613,11 +613,12 @@ Behavior:
 
 1. Load the managed registry.
 2. Enumerate only entries with both a valid marker and a path matching the configured pattern.
-3. Refuse to prune dirty worktrees unless `--force` is set.
-4. Remove the Git worktree.
-5. Remove the directory.
-6. Remove the branch only when `--with-branches` is supplied and the branch is fully merged to the target.
-7. Mark status `pruned`.
+3. Refuse to prune tracked-dirty worktrees unless `--force` is set.
+4. Refuse to prune worktrees with unexpected untracked files unless `--force` is set.
+5. Remove the Git worktree with force after safety validation so expected local bootstrap files and `.mwt-worktree.json` do not block cleanup.
+6. Remove the directory.
+7. Remove the branch only when `--with-branches` is supplied and the branch is fully merged to the target.
+8. Mark status `pruned`.
 
 ### `mwt doctor`
 
