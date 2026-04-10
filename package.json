@@ -1,0 +1,21 @@
+{
+  "name": "managed-worktree-system",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Design and implementation home for a managed Git worktree system for parallel human and AI work.",
+  "scripts": {
+    "lint": "markdownlint \"**/*.md\" --ignore node_modules",
+    "test": "node scripts/test.mjs",
+    "build": "compose-agentsmd",
+    "verify": "npm run lint && npm run test && npm run build",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "compose-agentsmd": "^6.0.0",
+    "markdownlint-cli": "^0.48.0",
+    "prettier": "^3.6.2"
+  },
+  "overrides": {
+    "smol-toml": "1.6.1"
+  }
+}
