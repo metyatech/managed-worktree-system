@@ -7,6 +7,7 @@ const requiredFiles = [
   'agent-ruleset.json',
   'README.md',
   'docs/managed-worktree-system-design.md',
+  'docs/managed-worktree-system-implementation-spec-v1.md',
   'LICENSE',
 ];
 
@@ -25,6 +26,10 @@ if (ruleset.source !== 'github:metyatech/agent-rules') {
 const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
 if (!readme.includes('docs/managed-worktree-system-design.md')) {
   throw new Error('README.md must link to the design document');
+}
+
+if (!readme.includes('docs/managed-worktree-system-implementation-spec-v1.md')) {
+  throw new Error('README.md must link to the implementation spec');
 }
 
 console.log('Tests OK.');

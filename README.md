@@ -27,6 +27,7 @@ The current repository baseline is **design-first**. It contains the initial arc
 Current primary artifact:
 
 - [Managed Worktree System Design](docs/managed-worktree-system-design.md)
+- [Managed Worktree System Implementation Spec v1](docs/managed-worktree-system-implementation-spec-v1.md)
 
 Planned future surface:
 
@@ -57,6 +58,7 @@ Planned future surface:
 ## Links
 
 - [Managed Worktree System Design](docs/managed-worktree-system-design.md)
+- [Managed Worktree System Implementation Spec v1](docs/managed-worktree-system-implementation-spec-v1.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
