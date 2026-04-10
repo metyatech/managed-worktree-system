@@ -55,6 +55,7 @@ End-to-end example:
 ```powershell
 npm exec -- mwt init --base main --remote origin
 npm exec -- mwt create feature-auth
+npm exec -- mwt create preview-auth --dry-run --json
 npm exec -- mwt list --kind task --status active --json
 npm exec -- mwt deliver feature-auth --target main
 npm exec -- mwt sync --base main
@@ -90,7 +91,7 @@ Parameters:
 - `--name <name>`: alias for the positional worktree name.
 - `--base <branch>`: override the configured base branch for this worktree.
 - `--copy-profile <profile>`: choose a bootstrap copy profile from `.mwt/config.toml`.
-- `--run-bootstrap`: keep bootstrap enabled explicitly.
+- `--run-bootstrap`: force bootstrap copy even when `bootstrap.enabled = false` in config.
 - `--no-bootstrap`: skip copying allowlisted ignored files such as `.env.local`.
 
 Example:
@@ -105,7 +106,7 @@ List the seed worktree and managed task worktrees.
 
 Parameters:
 
-- `--all`: accepted for automation compatibility.
+- `--all`: include external unmanaged Git worktrees in the listing.
 - `--kind <seed|task>`: filter by worktree kind.
 - `--status <active|delivered|conflict|abandoned|healthy>`: filter by managed status.
 
@@ -123,7 +124,6 @@ Parameters:
 
 - `<name>`: task worktree name or worktree id. If omitted, the current task worktree is used.
 - `--target <branch>`: override the configured delivery target branch.
-- `--keep`: accepted for forward compatibility. Current behavior already keeps the task worktree after delivery.
 - `--allow-dirty-task`: skip the pre-deliver tracked-clean task check.
 - `--resume`: rerun delivery after a previously recorded conflict or interruption.
 
@@ -140,7 +140,6 @@ Fast-forward the seed worktree to the configured remote branch.
 Parameters:
 
 - `--base <branch>`: override the configured branch for this sync.
-- `--force-fetch`: accepted for forward compatibility. Current behavior always fetches before syncing.
 
 Example:
 
@@ -172,7 +171,7 @@ Validate managed metadata and optionally repair registry drift.
 Parameters:
 
 - `--fix`: repair missing or stale registry entries when possible.
-- `--deep`: accepted for forward compatibility.
+- `--deep`: include lock files, orphan sibling directories, and seed topology checks.
 
 Example:
 
@@ -194,7 +193,7 @@ npm exec -- mwt version
 
 - `--json`: emit a single JSON envelope on stdout.
 - `--output <path>`: also write the JSON envelope to a file.
-- `--dry-run`: return a non-mutating preview envelope for commands that support preview mode.
+- `--dry-run`: return a non-mutating action plan instead of changing repository state.
 - `--yes`: approve hook execution or other guarded automation steps.
 - `--quiet`: suppress human-readable stderr summaries.
 - `--verbose` or `-v`: reserve verbose logging for future expansion.
@@ -205,6 +204,7 @@ npm exec -- mwt version
 
 - `npm run lint`
 - `npm run test`
+- `npm run package:check`
 - `npm run build`
 - `npm run verify`
 - `npm run format`
@@ -215,7 +215,7 @@ npm exec -- mwt version
 
 ## Release / deploy
 
-- Not applicable yet. The repository currently produces a local CLI surface rather than a published release artifact.
+- The package is verified for installability with `npm run package:check`, but it is not published yet.
 
 ## Links
 

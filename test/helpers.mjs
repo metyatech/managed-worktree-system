@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+import { pathExists, readText } from '../src/lib/fs.mjs';
 import { runProcess } from '../src/lib/process.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
-const cliPath = path.join(projectRoot, 'src', 'cli.mjs');
+export const cliPath = path.join(projectRoot, 'src', 'cli.mjs');
 
 export async function run(file, args, options = {}) {
   const result = await runProcess(file, args, options);
@@ -26,8 +29,11 @@ export async function runGit(cwd, args, check = true) {
   return result;
 }
 
-export async function runCli(cwd, args, expectCode = 0) {
-  const result = await run(process.execPath, [cliPath, ...args], { cwd });
+export async function runCli(cwd, args, expectCode = 0, options = {}) {
+  const result = await run(process.execPath, [cliPath, ...args], {
+    cwd,
+    env: options.env,
+  });
   assert.equal(result.code, expectCode, result.stderr || result.stdout);
   return result;
 }
@@ -71,4 +77,21 @@ export async function createRepoWithRemote() {
 
 export async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+export async function waitForPath(targetPath, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pathExists(targetPath)) {
+      return true;
+    }
+
+    await delay(50);
+  }
+
+  throw new Error(`Timed out waiting for path: ${targetPath}`);
+}
+
+export async function readFileText(filePath) {
+  return readText(filePath);
 }

@@ -270,7 +270,7 @@ Key rules:
 
 - the repository root becomes the seed worktree
 - `.git` becomes a pointer to `.bare`
-- ignored runtime state under `.mwt/state/` and `.mwt/logs/` is added to `.gitignore`
+- ignored runtime state under `.mwt/state/` and `.mwt/logs/` is added to the local Git exclude rules
 - project config stays versioned; runtime state stays ignored
 
 ### `mwt create`
@@ -308,7 +308,7 @@ Flow:
 7. Push `HEAD:<target>` to the remote.
 8. Fast-forward the seed worktree to `origin/<target>`.
 9. Mark delivery success in state files.
-10. Optionally prune the task worktree.
+10. Leave the task worktree available for an explicit later `mwt prune`.
 
 This flow intentionally **does not** use a second integration worktree in v1. The task worktree is already isolated, so a separate merge lane adds complexity without protecting the seed worktree further.
 
@@ -395,6 +395,7 @@ State should record:
 - seed branch
 - managed worktree name, branch, path, and kind
 - bootstrap status
+- operation lock state
 - last verification result
 - last delivery result
 - last sync result

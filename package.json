@@ -4,6 +4,18 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Managed Git worktree CLI for parallel human and AI task work with a clean seed checkout.",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src/",
+    "docs/",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
   "bin": {
     "mwt": "./src/cli.mjs"
   },
@@ -12,9 +24,10 @@
     "lint:js": "npm exec -- eslint .",
     "lint": "npm run lint:docs && npm run lint:js",
     "audit": "npm audit --audit-level=moderate",
+    "package:check": "npm pack --json --dry-run",
     "test": "node --test",
     "build": "npm exec -- compose-agentsmd",
-    "verify": "npm run lint && npm run test && npm run audit && npm run build",
+    "verify": "npm run lint && npm run test && npm run audit && npm run package:check && npm run build",
     "format": "npm exec -- prettier --write ."
   },
   "devDependencies": {

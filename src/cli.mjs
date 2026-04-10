@@ -11,7 +11,6 @@ import {
 } from './lib/constants.mjs';
 import { asMwtError, MwtError } from './lib/errors.mjs';
 import {
-  assertSeedClean,
   createTaskWorktree,
   deliverTaskWorktree,
   detectContext,
@@ -19,10 +18,17 @@ import {
   findTaskByName,
   initializeRepository,
   listWorktrees,
+  planCreateTaskWorktree,
+  planDeliverTaskWorktree,
+  planDoctorRepository,
+  planInitializeRepository,
+  planPruneWorktrees,
+  planSyncSeed,
   pruneWorktrees,
   syncSeed,
 } from './lib/repo.mjs';
 import { toPortablePath, writeJson } from './lib/fs.mjs';
+import { withLock } from './lib/locks.mjs';
 
 const HELP_TEXT = `${TOOL_NAME} - managed Git worktree CLI
 
@@ -44,13 +50,13 @@ const COMMAND_HELP = {
   init: `Usage: mwt init [--base <branch>] [--remote <name>] [--force] [--json]
 Example: mwt init --base main --remote origin --json
 `,
-  create: `Usage: mwt create <name> [--base <branch>] [--copy-profile <profile>] [--no-bootstrap] [--json]
+  create: `Usage: mwt create <name> [--base <branch>] [--copy-profile <profile>] [--run-bootstrap|--no-bootstrap] [--json]
 Example: mwt create feature-auth --base main --json
 `,
-  list: `Usage: mwt list [--json]
-Example: mwt list --json
+  list: `Usage: mwt list [--all] [--kind <seed|task>] [--status <status>] [--json]
+Example: mwt list --kind task --status active --json
 `,
-  deliver: `Usage: mwt deliver [<name>] [--target <branch>] [--keep] [--resume] [--json]
+  deliver: `Usage: mwt deliver [<name>] [--target <branch>] [--allow-dirty-task] [--resume] [--json]
 Example: mwt deliver feature-auth --target main --json
 `,
   sync: `Usage: mwt sync [--base <branch>] [--json]
@@ -172,14 +178,12 @@ function parseCommandOptions(command, args) {
     deliver: {
       ...shared,
       target: { type: 'string' },
-      keep: { type: 'boolean' },
       'allow-dirty-task': { type: 'boolean' },
       resume: { type: 'boolean' },
     },
     sync: {
       ...shared,
       base: { type: 'string' },
-      'force-fetch': { type: 'boolean' },
     },
     prune: {
       ...shared,
@@ -236,15 +240,121 @@ async function writeCommandResult(outputOptions, envelope, stderr) {
 async function runCommand(command, parsed) {
   const { values, positionals } = parsed;
   const context = await detectContext(process.cwd());
+  const runWithRepoLock = (work) => withLock(context.seedRoot, 'repo', { command }, work);
 
-  if (values['dry-run'] && !['list', 'doctor'].includes(command)) {
-    return {
-      repoRoot: context.seedRoot,
-      result: {
-        summary: `Dry-run for ${command} is not implemented yet.`,
-        dryRun: true,
-      },
-    };
+  if (command === 'create' && values['run-bootstrap'] && values['no-bootstrap']) {
+    throw new MwtError({
+      code: EXIT_CODES.INVALID_USAGE,
+      id: 'conflicting_bootstrap_flags',
+      message: 'mwt create cannot use --run-bootstrap and --no-bootstrap together.',
+    });
+  }
+
+  if (values['dry-run']) {
+    switch (command) {
+      case 'init':
+        return {
+          repoRoot: context.worktreeRoot,
+          result: {
+            ...(await planInitializeRepository(context.worktreeRoot, {
+              base: values.base,
+              remote: values.remote,
+              force: values.force,
+            })),
+            summary: `Planned initialization for ${toPortablePath(context.worktreeRoot)}.`,
+          },
+        };
+      case 'create': {
+        const name = positionals[0] ?? values.name;
+        if (!name) {
+          throw new MwtError({
+            code: EXIT_CODES.INVALID_USAGE,
+            id: 'missing_worktree_name',
+            message: 'mwt create requires a worktree name.',
+          });
+        }
+
+        return {
+          repoRoot: context.seedRoot,
+          result: {
+            ...(await planCreateTaskWorktree(context.seedRoot, name, {
+              base: values.base,
+              bootstrap: values['run-bootstrap'] ? true : (values['no-bootstrap'] ? false : undefined),
+              copyProfile: values['copy-profile'],
+            })),
+            summary: `Planned task worktree creation for ${name}.`,
+          },
+        };
+      }
+      case 'sync':
+        return {
+          repoRoot: context.seedRoot,
+          result: {
+            ...(await planSyncSeed(context.seedRoot, {
+              base: values.base,
+            })),
+            summary: 'Planned seed synchronization.',
+          },
+        };
+      case 'deliver': {
+        let taskRoot = context.worktreeRoot;
+        if (positionals[0]) {
+          const task = await findTaskByName(context.seedRoot, positionals[0]);
+          taskRoot = task.path;
+        }
+
+        return {
+          repoRoot: context.seedRoot,
+          result: {
+            ...(await planDeliverTaskWorktree(taskRoot, {
+              target: values.target,
+              allowDirtyTask: values['allow-dirty-task'],
+              resume: values.resume,
+            })),
+            summary: 'Planned task worktree delivery.',
+          },
+        };
+      }
+      case 'prune':
+        return {
+          repoRoot: context.seedRoot,
+          result: {
+            ...(await planPruneWorktrees(context.seedRoot, {
+              merged: values.merged,
+              abandoned: values.abandoned,
+              force: values.force,
+              withBranches: values['with-branches'],
+            })),
+            summary: 'Planned worktree pruning.',
+          },
+        };
+      case 'doctor':
+        return {
+          repoRoot: context.seedRoot,
+          result: {
+            ...(await planDoctorRepository(context.seedRoot, {
+              fix: values.fix,
+              deep: values.deep,
+            })),
+            summary: values.fix ? 'Planned doctor repair actions.' : 'Planned doctor inspection.',
+          },
+        };
+      case 'list':
+        return {
+          repoRoot: context.worktreeRoot,
+          result: {
+            items: await listWorktrees(context.worktreeRoot, {
+              all: values.all,
+              kind: values.kind,
+              status: values.status,
+            }),
+            dryRun: true,
+            summary: 'Listed worktrees without mutation.',
+          },
+        };
+      default:
+        break;
+    }
   }
 
   switch (command) {
@@ -273,12 +383,12 @@ async function runCommand(command, parsed) {
         });
       }
 
-      const result = await createTaskWorktree(context.seedRoot, name, {
+      const result = await runWithRepoLock(() => createTaskWorktree(context.seedRoot, name, {
         base: values.base,
-        bootstrap: !values['no-bootstrap'],
+        bootstrap: values['run-bootstrap'] ? true : (values['no-bootstrap'] ? false : undefined),
         copyProfile: values['copy-profile'],
         yes: values.yes,
-      });
+      }));
       return {
         repoRoot: context.seedRoot,
         result: {
@@ -302,10 +412,9 @@ async function runCommand(command, parsed) {
       };
     }
     case 'sync': {
-      await assertSeedClean(context.seedRoot);
-      const result = await syncSeed(context.seedRoot, {
+      const result = await runWithRepoLock(() => syncSeed(context.seedRoot, {
         base: values.base,
-      });
+      }));
       return {
         repoRoot: context.seedRoot,
         result: {
@@ -315,10 +424,15 @@ async function runCommand(command, parsed) {
       };
     }
     case 'doctor': {
-      const result = await doctorRepository(context.seedRoot, {
-        fix: values.fix,
-        deep: values.deep,
-      });
+      const result = values.fix
+        ? await runWithRepoLock(() => doctorRepository(context.seedRoot, {
+          fix: values.fix,
+          deep: values.deep,
+        }))
+        : await doctorRepository(context.seedRoot, {
+          fix: values.fix,
+          deep: values.deep,
+        });
       return {
         repoRoot: context.seedRoot,
         result: {
@@ -336,13 +450,12 @@ async function runCommand(command, parsed) {
         taskRoot = task.path;
       }
 
-      const result = await deliverTaskWorktree(taskRoot, {
+      const result = await runWithRepoLock(() => deliverTaskWorktree(taskRoot, {
         target: values.target,
-        keep: values.keep,
         allowDirtyTask: values['allow-dirty-task'],
         resume: values.resume,
         yes: values.yes,
-      });
+      }));
       return {
         repoRoot: context.seedRoot,
         result: {
@@ -352,12 +465,12 @@ async function runCommand(command, parsed) {
       };
     }
     case 'prune': {
-      const result = await pruneWorktrees(context.seedRoot, {
+      const result = await runWithRepoLock(() => pruneWorktrees(context.seedRoot, {
         merged: values.merged,
         abandoned: values.abandoned,
         force: values.force,
         withBranches: values['with-branches'],
-      });
+      }));
       return {
         repoRoot: context.seedRoot,
         result: {

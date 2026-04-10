@@ -10,10 +10,12 @@ export const MWT_HOOK_DIR = '.mwt/hooks';
 export const MWT_MARKER_FILE = '.mwt-worktree.json';
 
 export const HOOK_APPROVALS_FILE = `${MWT_STATE_DIR}/hook-approvals.json`;
+export const LOCKS_DIR = `${MWT_STATE_DIR}/locks`;
 export const SEED_STATE_FILE = `${MWT_STATE_DIR}/seed.json`;
 export const WORKTREE_STATE_FILE = `${MWT_STATE_DIR}/worktrees.json`;
 export const LAST_DELIVER_STATE_FILE = `${MWT_STATE_DIR}/last-deliver.json`;
 export const LAST_SYNC_STATE_FILE = `${MWT_STATE_DIR}/last-sync.json`;
+export const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1000;
 
 export const EXIT_CODES = Object.freeze({
   SUCCESS: 0,
@@ -29,6 +31,7 @@ export const EXIT_CODES = Object.freeze({
   WORKTREE_NOT_FOUND: 10,
   UNSAFE_PRUNE_TARGET: 11,
   UNSUPPORTED_INIT_STATE: 12,
+  OPERATION_LOCKED: 13,
 });
 
 export const DEFAULT_BOOTSTRAP_PROFILE = 'local';

@@ -24,6 +24,7 @@ This spec does **not** define:
 - distributed locking across multiple hosts
 - automatic merge-conflict resolution
 - background daemons
+- multi-host distributed locking
 
 ## Reference-Derived Constraints
 
@@ -151,7 +152,6 @@ All commands SHOULD support:
 #### `mwt deliver`
 
 - `--target <branch>`
-- `--keep`
 - `--allow-dirty-task`
 - `--resume`
 
@@ -160,7 +160,6 @@ If `<name>` is omitted, `deliver` operates on the current worktree.
 #### `mwt sync`
 
 - `--base <branch>`
-- `--force-fetch`
 
 #### `mwt prune`
 
@@ -193,6 +192,7 @@ Exit codes MUST be deterministic across commands.
 | `10` | Requested managed worktree not found |
 | `11` | Unsafe prune target |
 | `12` | Unsupported repository state during `init` migration |
+| `13` | Another managed-worktree operation is already holding the repository lock |
 
 ## Output Contract
 
@@ -250,6 +250,7 @@ repo-root/
     hooks/
     templates/
     state/
+      locks/
       seed.json
       worktrees.json
       last-deliver.json
@@ -277,6 +278,7 @@ task_worktree_dir_template = "{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shor
 task_branch_template = "wt/{{ slug }}/{{ shortid }}"
 
 [bootstrap]
+enabled = true
 default_profile = "local"
 
 [bootstrap.profiles.local]
@@ -472,7 +474,8 @@ Hook classes:
 Rules:
 
 - `pre_*` hooks are blocking
-- `post_*` hooks are non-blocking by default
+- `post_*` hooks remain blocking in v1 for deterministic CLI completion
+- project-local hook commands are resolved from the seed worktree
 - project hooks require approval fingerprinting unless `--yes` is supplied
 - hook context is passed as JSON on stdin
 
@@ -569,6 +572,7 @@ Behavior:
 - enumerate Git worktrees
 - enrich with `.mwt-worktree.json` when present
 - classify each worktree as `seed`, `task`, or `external`
+- omit `external` worktrees unless `--all` is supplied
 - report divergence, dirty state, and last-known managed status
 
 ### `mwt deliver`
@@ -595,7 +599,7 @@ Behavior:
 12. If seed sync fails, persist failure and exit `9`.
 13. Run `post_deliver`.
 14. Mark task status `delivered`.
-15. If `--keep` is not set, leave the worktree prunable but do not auto-delete in v1.
+15. Leave the delivered worktree prunable; cleanup remains an explicit `mwt prune` step.
 
 ### `mwt sync`
 
@@ -629,6 +633,7 @@ Behavior:
 - detect stale registry entries
 - detect stale directories matching the naming pattern but missing markers
 - detect drift between Git worktree list and managed state files
+- with `--deep`, detect stale lock files, orphan sibling directories, and seed topology drift
 
 `--fix` may:
 

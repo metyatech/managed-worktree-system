@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { cp, rename } from 'node:fs/promises';
+import { cp, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 
 import { Minimatch } from 'minimatch';
@@ -20,6 +20,7 @@ import {
   MWT_STATE_DIR,
   MWT_TEMPLATE_DIR,
   SEED_STATE_FILE,
+  LOCKS_DIR,
   TOOL_STATE_VERSION,
   WORKTREE_STATE_FILE,
 } from './constants.mjs';
@@ -56,6 +57,11 @@ import {
   removeWorktree,
   worktreeList,
 } from './git.mjs';
+import {
+  clearExpiredLocks,
+  listLocks,
+  lockIssueFromRecord,
+} from './locks.mjs';
 import { runShell } from './process.mjs';
 
 export function slugifyName(name) {
@@ -93,6 +99,7 @@ export function getManagedPaths(seedRoot) {
     hooksDir: path.join(seedRoot, MWT_HOOK_DIR),
     templatesDir: path.join(seedRoot, MWT_TEMPLATE_DIR),
     stateDir: path.join(seedRoot, MWT_STATE_DIR),
+    locksDir: path.join(seedRoot, LOCKS_DIR),
     logsDir: path.join(seedRoot, MWT_LOG_DIR),
     hookApprovalsPath: path.join(seedRoot, HOOK_APPROVALS_FILE),
     seedStatePath: path.join(seedRoot, SEED_STATE_FILE),
@@ -202,6 +209,7 @@ export function createDefaultConfig({ defaultBranch, defaultRemote, verifyComman
     task_worktree_dir_template: '{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shortid }}',
     task_branch_template: 'wt/{{ slug }}/{{ shortid }}',
     bootstrap: {
+      enabled: true,
       default_profile: DEFAULT_BOOTSTRAP_PROFILE,
       profiles: {
         local: {
@@ -210,7 +218,6 @@ export function createDefaultConfig({ defaultBranch, defaultRemote, verifyComman
         },
       },
     },
-    hooks: {},
     verify: {
       command: verifyCommand,
     },
@@ -281,6 +288,7 @@ export async function ensureManagedDirs(seedRoot) {
   await ensureDir(managedPaths.hooksDir);
   await ensureDir(managedPaths.templatesDir);
   await ensureDir(managedPaths.stateDir);
+  await ensureDir(managedPaths.locksDir);
   await ensureDir(managedPaths.logsDir);
 }
 
@@ -539,7 +547,11 @@ export async function runHooks(seedRoot, hookType, context, options = {}) {
     }
 
     const result = await runShell(command, {
-      cwd: options.worktreePath ?? seedRoot,
+      cwd: seedRoot,
+      env: {
+        MWT_SEED_PATH: seedRoot,
+        ...(options.worktreePath ? { MWT_WORKTREE_PATH: options.worktreePath } : {}),
+      },
       input: `${JSON.stringify(context)}\n`,
     });
 
@@ -588,7 +600,7 @@ function matchesAny(matchers, value) {
   return matchers.some((matcher) => matcher.match(value));
 }
 
-export async function copyBootstrapFiles(seedRoot, taskRoot, config, profileName = undefined) {
+function resolveBootstrapProfile(config, profileName = undefined) {
   const profileKey = profileName ?? config.bootstrap?.default_profile ?? DEFAULT_BOOTSTRAP_PROFILE;
   const profile = config.bootstrap?.profiles?.[profileKey];
   if (!profile) {
@@ -599,15 +611,50 @@ export async function copyBootstrapFiles(seedRoot, taskRoot, config, profileName
     });
   }
 
+  return {
+    profileKey,
+    profile,
+  };
+}
+
+export function bootstrapEnabled(config, options = {}) {
+  if (options.bootstrap === true) {
+    return true;
+  }
+
+  if (options.bootstrap === false) {
+    return false;
+  }
+
+  return config.bootstrap?.enabled !== false;
+}
+
+export async function getBootstrapCandidates(seedRoot, config, profileName = undefined) {
+  const { profileKey, profile } = resolveBootstrapProfile(config, profileName);
   const includeMatchers = compilePatterns(profile.include ?? []);
   const excludeMatchers = compilePatterns(profile.exclude ?? []);
   const ignoredFiles = await listIgnoredFiles(seedRoot);
-  const copied = [];
+  const candidates = [];
 
   for (const relativePath of ignoredFiles) {
     if (!matchesAny(includeMatchers, relativePath) || matchesAny(excludeMatchers, relativePath)) {
       continue;
     }
+
+    candidates.push(relativePath);
+  }
+
+  return {
+    profileKey,
+    candidates,
+  };
+}
+
+export async function copyBootstrapFiles(seedRoot, taskRoot, config, profileName = undefined) {
+  const { profileKey, candidates } = await getBootstrapCandidates(seedRoot, config, profileName);
+  const copied = [];
+
+  for (const relativePath of candidates) {
 
     const sourcePath = path.join(seedRoot, relativePath);
     const destinationPath = path.join(taskRoot, relativePath);
@@ -623,7 +670,173 @@ export async function copyBootstrapFiles(seedRoot, taskRoot, config, profileName
     copied.push(relativePath);
   }
 
-  return copied;
+  return {
+    profileKey,
+    copied,
+  };
+}
+
+export async function planInitializeRepository(seedRoot, options = {}) {
+  const managedPaths = getManagedPaths(seedRoot);
+  if (await pathExists(managedPaths.configPath)) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'already_initialized',
+      message: 'Repository is already initialized for managed-worktree-system.',
+    });
+  }
+
+  if (!(options.force) && (await hasTrackedChanges(seedRoot))) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_requires_clean_repo',
+      message: 'Repository must be clean before init unless --force is supplied.',
+      details: {
+        changedFiles: await listTrackedChanges(seedRoot),
+      },
+    });
+  }
+
+  const defaultBranch = options.base ?? await getCurrentBranch(seedRoot);
+  const defaultRemote = options.remote ?? 'origin';
+  const verifyCommand = await discoverVerifyCommand(seedRoot);
+  const gitDir = await getGitDir(seedRoot);
+
+  return {
+    dryRun: true,
+    seedRoot: toPortablePath(seedRoot),
+    defaultBranch,
+    defaultRemote,
+    verifyCommand,
+    actions: [
+      { id: 'move_git_dir', description: `Move ${gitDir} to .bare and rewrite .git pointer.` },
+      { id: 'create_managed_dirs', description: 'Create .mwt directories for config, state, locks, logs, hooks, and templates.' },
+      { id: 'write_config', description: 'Write .mwt/config.toml with default branch, remote, and verify command.' },
+      { id: 'write_seed_marker', description: 'Write the seed .mwt-worktree.json marker.' },
+      { id: 'write_seed_state', description: 'Write seed.json and initialize worktrees.json.' },
+      { id: 'update_local_exclude', description: 'Add managed runtime paths to .bare/info/exclude.' },
+    ],
+  };
+}
+
+export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
+  const config = await loadConfig(seedRoot);
+  await assertSeedClean(seedRoot);
+
+  const baseBranch = options.base ?? config.default_branch;
+  const targetBranch = options.target ?? config.default_branch;
+  const slug = slugifyName(taskName);
+  const previewId = 'preview000';
+  const worktreePath = renderTaskPath(seedRoot, config, slug, previewId);
+  const branch = renderTaskBranch(config, slug, previewId);
+
+  if (await pathExists(worktreePath)) {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'worktree_path_occupied',
+      message: 'Target worktree path is already occupied.',
+      details: {
+        worktreePath: toPortablePath(worktreePath),
+      },
+    });
+  }
+
+  const bootstrapPlan = bootstrapEnabled(config, options)
+    ? await getBootstrapCandidates(seedRoot, config, options.copyProfile)
+    : { profileKey: options.copyProfile ?? config.bootstrap?.default_profile ?? DEFAULT_BOOTSTRAP_PROFILE, candidates: [] };
+
+  return {
+    dryRun: true,
+    worktreeName: taskName,
+    worktreeSlug: slug,
+    previewId,
+    worktreePath: toPortablePath(worktreePath),
+    branch,
+    baseBranch,
+    targetBranch,
+    bootstrapProfile: bootstrapPlan.profileKey,
+    bootstrapCandidates: bootstrapPlan.candidates,
+    actions: [
+      { id: 'fetch_base', description: `Fetch ${config.default_remote}/${baseBranch}.` },
+      { id: 'add_worktree', description: `Create branch ${branch} and sibling worktree ${toPortablePath(worktreePath)}.` },
+      { id: 'write_task_marker', description: 'Write .mwt-worktree.json in the task worktree.' },
+      { id: 'run_pre_create_hooks', description: 'Run blocking pre_create hooks.' },
+      { id: 'copy_bootstrap', description: `Copy ${bootstrapPlan.candidates.length} allowlisted ignored file(s) using profile ${bootstrapPlan.profileKey}.` },
+      { id: 'run_post_create_hooks', description: 'Run post_create hooks.' },
+      { id: 'register_worktree', description: 'Append the task worktree to worktrees.json.' },
+    ],
+  };
+}
+
+export async function planSyncSeed(seedRoot, options = {}) {
+  const config = await loadConfig(seedRoot);
+  await assertSeedClean(seedRoot);
+
+  const branch = options.base ?? config.default_branch;
+  return {
+    dryRun: true,
+    branch,
+    remote: config.default_remote,
+    before: await getHeadCommit(seedRoot),
+    actions: [
+      { id: 'fetch_target', description: `Fetch ${config.default_remote}/${branch}.` },
+      { id: 'fast_forward_seed', description: `Fast-forward the seed worktree to ${config.default_remote}/${branch}.` },
+      { id: 'write_sync_state', description: 'Update seed.json and last-sync.json.' },
+    ],
+  };
+}
+
+export async function planDeliverTaskWorktree(taskRoot, options = {}) {
+  const marker = await loadMarker(taskRoot);
+  if (!marker || marker.kind !== 'task') {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'not_a_task_worktree',
+      message: 'Deliver must run against a managed task worktree.',
+    });
+  }
+
+  const seedRoot = marker.repoRoot;
+  const config = await loadConfig(seedRoot);
+  await assertSeedClean(seedRoot);
+  if (!options.allowDirtyTask) {
+    await assertTaskClean(taskRoot);
+  }
+
+  const state = await readWorktreeState(seedRoot);
+  const item = state.items.find((entry) => entry.worktreeId === marker.worktreeId) ?? null;
+  if (options.resume && item && !['conflict', 'delivering'].includes(item.status)) {
+    throw new MwtError({
+      code: EXIT_CODES.INVALID_USAGE,
+      id: 'deliver_resume_not_needed',
+      message: 'deliver --resume is only valid for a conflicted or interrupted task worktree.',
+      details: {
+        currentStatus: item.status,
+      },
+    });
+  }
+
+  const targetBranch = options.target ?? marker.targetBranch ?? config.default_branch;
+  return {
+    dryRun: true,
+    worktreeId: marker.worktreeId,
+    worktreeName: marker.worktreeName,
+    taskPath: marker.worktreePath,
+    targetBranch,
+    verifyCommand: config.verify?.command ?? null,
+    currentStatus: item?.status ?? 'active',
+    actions: [
+      { id: 'mark_delivering', description: 'Set runtime state to delivering.' },
+      { id: 'fetch_target', description: `Fetch ${config.default_remote}/${targetBranch}.` },
+      { id: 'rebase_task', description: `Rebase the task branch onto ${config.default_remote}/${targetBranch}.` },
+      { id: 'run_pre_deliver_hooks', description: 'Run blocking pre_deliver hooks.' },
+      { id: 'run_verify', description: `Run ${config.verify?.command ?? 'the configured verify command'}.` },
+      { id: 'push_target', description: `Push HEAD to ${config.default_remote}:${targetBranch}.` },
+      { id: 'sync_seed', description: `Fast-forward the seed worktree to ${config.default_remote}/${targetBranch}.` },
+      { id: 'run_post_deliver_hooks', description: 'Run post_deliver hooks.' },
+      { id: 'mark_delivered', description: 'Persist last-deliver.json and mark the task as delivered.' },
+    ],
+  };
 }
 
 export async function createTaskWorktree(seedRoot, taskName, options = {}) {
@@ -697,9 +910,9 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     worktreePath,
   });
 
-  const copiedFiles = options.bootstrap === false
-    ? []
-    : await copyBootstrapFiles(seedRoot, worktreePath, config, options.copyProfile);
+  const bootstrapResult = bootstrapEnabled(config, options)
+    ? await copyBootstrapFiles(seedRoot, worktreePath, config, options.copyProfile)
+    : { profileKey: options.copyProfile ?? config.bootstrap?.default_profile ?? DEFAULT_BOOTSTRAP_PROFILE, copied: [] };
 
   await runHooks(seedRoot, 'post_create', {
     ...hookContext,
@@ -715,7 +928,7 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     branch,
     path: toPortablePath(worktreePath),
     status: 'active',
-    bootstrapFiles: copiedFiles,
+    bootstrapFiles: bootstrapResult.copied,
   });
 
   return {
@@ -726,7 +939,8 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     branch,
     baseBranch,
     targetBranch,
-    copiedFiles,
+    bootstrapProfile: bootstrapResult.profileKey,
+    copiedFiles: bootstrapResult.copied,
     marker,
   };
 }
@@ -774,6 +988,10 @@ export async function listWorktrees(seedRoot, options = {}) {
   }
 
   return items.filter((item) => {
+    if (!options.all && item.kind === 'external') {
+      return false;
+    }
+
     if (options.kind && item.kind !== options.kind) {
       return false;
     }
@@ -860,6 +1078,19 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
   await assertSeedClean(seedRoot);
   if (!options.allowDirtyTask) {
     await assertTaskClean(taskRoot);
+  }
+
+  const state = await readWorktreeState(seedRoot);
+  const item = state.items.find((entry) => entry.worktreeId === marker.worktreeId) ?? null;
+  if (options.resume && item && !['conflict', 'delivering'].includes(item.status)) {
+    throw new MwtError({
+      code: EXIT_CODES.INVALID_USAGE,
+      id: 'deliver_resume_not_needed',
+      message: 'deliver --resume is only valid for a conflicted or interrupted task worktree.',
+      details: {
+        currentStatus: item.status,
+      },
+    });
   }
 
   const targetBranch = options.target ?? marker.targetBranch ?? config.default_branch;
@@ -990,6 +1221,73 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
   };
 }
 
+export async function planPruneWorktrees(seedRoot, options = {}) {
+  const state = await readWorktreeState(seedRoot);
+  const eligible = [];
+  const blocked = [];
+
+  for (const item of state.items) {
+    const shouldPruneDelivered = options.merged && item.status === 'delivered';
+    const shouldPruneAbandoned = options.abandoned && item.status === 'abandoned';
+    if (!(shouldPruneDelivered || shouldPruneAbandoned)) {
+      continue;
+    }
+
+    const marker = await loadMarker(item.path);
+    if (!marker || marker.kind !== 'task') {
+      blocked.push({
+        worktreeId: item.worktreeId,
+        name: item.name,
+        reason: 'missing_task_marker',
+      });
+      continue;
+    }
+
+    const pathExistsNow = await pathExists(item.path);
+    let unexpectedUntracked = [];
+    let trackedDirty = false;
+    if (pathExistsNow) {
+      trackedDirty = await hasTrackedChanges(item.path);
+      const untracked = await listUntrackedChanges(item.path);
+      const allowedUntracked = new Set([
+        MWT_MARKER_FILE,
+        ...(item.bootstrapFiles ?? []),
+      ]);
+      unexpectedUntracked = untracked.filter((entry) => !allowedUntracked.has(entry));
+    }
+
+    if (!options.force && (trackedDirty || unexpectedUntracked.length > 0)) {
+      blocked.push({
+        worktreeId: item.worktreeId,
+        name: item.name,
+        reason: trackedDirty ? 'tracked_dirty' : 'unexpected_untracked',
+        unexpectedUntracked,
+      });
+      continue;
+    }
+
+    eligible.push({
+      worktreeId: item.worktreeId,
+      name: item.name,
+      path: item.path,
+      branch: item.branch,
+      branchDeleted: options.withBranches
+        ? await isBranchMerged(seedRoot, item.branch, marker.targetBranch)
+        : false,
+    });
+  }
+
+  return {
+    dryRun: true,
+    eligible,
+    blocked,
+    actions: eligible.map((item) => ({
+      id: 'prune_worktree',
+      description: `Remove ${item.name} at ${item.path}${item.branchDeleted ? ' and delete its merged local branch.' : '.'}`,
+    })),
+  };
+}
+
 export async function pruneWorktrees(seedRoot, options = {}) {
   const state = await readWorktreeState(seedRoot);
   const pruned = [];
@@ -1070,7 +1368,20 @@ export async function pruneWorktrees(seedRoot, options = {}) {
   };
 }
 
-export async function doctorRepository(seedRoot, options = {}) {
+function getSiblingTaskPrefix(seedRoot) {
+  return `${path.basename(seedRoot)}-wt-`;
+}
+
+async function listSiblingTaskDirectories(seedRoot) {
+  const parentDir = path.dirname(seedRoot);
+  const prefix = getSiblingTaskPrefix(seedRoot);
+  const entries = await readdir(parentDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+    .map((entry) => path.join(parentDir, entry.name));
+}
+
+async function assessDoctorRepository(seedRoot, options = {}) {
   const managedPaths = getManagedPaths(seedRoot);
   if (!(await pathExists(managedPaths.configPath)) || !(await pathExists(managedPaths.markerPath))) {
     throw new MwtError({
@@ -1083,7 +1394,7 @@ export async function doctorRepository(seedRoot, options = {}) {
   const issues = [];
   const actions = [];
   const state = await readWorktreeState(seedRoot);
-  const listed = await worktreeList(seedRoot);
+  const listed = (await worktreeList(seedRoot)).filter((entry) => !entry.bare);
   const listedPaths = new Set(listed.map((entry) => path.resolve(entry.path)));
   const nextItems = [];
 
@@ -1134,6 +1445,52 @@ export async function doctorRepository(seedRoot, options = {}) {
     }
   }
 
+  if (options.deep) {
+    if (!(await pathExists(managedPaths.bareGitDir))) {
+      issues.push({
+        id: 'missing_bare_git_dir',
+        severity: 'error',
+        message: 'The .bare Git directory is missing.',
+      });
+    }
+
+    const gitDir = await getGitDir(seedRoot);
+    if (gitDir !== '.bare') {
+      issues.push({
+        id: 'unexpected_git_dir',
+        severity: 'error',
+        message: 'The seed worktree .git pointer is not targeting .bare.',
+        details: {
+          gitDir,
+        },
+      });
+    }
+
+    const locks = await listLocks(seedRoot);
+    for (const lockRecord of locks) {
+      issues.push(lockIssueFromRecord(lockRecord));
+    }
+
+    const siblingDirs = await listSiblingTaskDirectories(seedRoot);
+    for (const siblingDir of siblingDirs) {
+      if (listedPaths.has(path.resolve(siblingDir))) {
+        continue;
+      }
+
+      const marker = await loadMarker(siblingDir);
+      issues.push({
+        id: marker?.kind === 'task' ? 'orphan_managed_sibling' : 'orphan_unmanaged_sibling',
+        severity: 'warning',
+        message: marker?.kind === 'task'
+          ? `Managed-looking sibling directory is not registered as a live Git worktree: ${path.basename(siblingDir)}`
+          : `Sibling directory matches the managed naming pattern but is not a live managed worktree: ${path.basename(siblingDir)}`,
+        details: {
+          path: toPortablePath(siblingDir),
+        },
+      });
+    }
+  }
+
   if (options.fix) {
     nextItems.sort((left, right) => left.name.localeCompare(right.name));
     await writeWorktreeState(seedRoot, {
@@ -1152,6 +1509,14 @@ export async function doctorRepository(seedRoot, options = {}) {
       });
       actions.push({ id: 'rebuild_seed_state' });
     }
+
+    if (options.deep) {
+      const clearedLocks = await clearExpiredLocks(seedRoot);
+      actions.push(...clearedLocks.map((scope) => ({
+        id: 'clear_expired_lock',
+        scope,
+      })));
+    }
   }
 
   return {
@@ -1159,4 +1524,43 @@ export async function doctorRepository(seedRoot, options = {}) {
     issues,
     actions,
   };
+}
+
+export async function planDoctorRepository(seedRoot, options = {}) {
+  const assessment = await assessDoctorRepository(seedRoot, {
+    deep: options.deep,
+    fix: false,
+  });
+  const plannedFixes = [];
+
+  if (options.fix) {
+    for (const issue of assessment.issues) {
+      if (issue.id === 'stale_registry_entry') {
+        plannedFixes.push({
+          id: 'remove_stale_registry_entry',
+          description: issue.message,
+        });
+      } else if (issue.id === 'missing_registry_entry') {
+        plannedFixes.push({
+          id: 'add_missing_registry_entry',
+          description: issue.message,
+        });
+      } else if (issue.id === 'stale_lock') {
+        plannedFixes.push({
+          id: 'clear_expired_lock',
+          description: issue.message,
+        });
+      }
+    }
+  }
+
+  return {
+    ...assessment,
+    dryRun: true,
+    plannedFixes,
+  };
+}
+
+export async function doctorRepository(seedRoot, options = {}) {
+  return assessDoctorRepository(seedRoot, options);
 }
