@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/metyatech/managed-worktree-system/security/advisories/new
+    about: Report security issues privately.
+  - name: Operations guide
+    url: https://github.com/metyatech/managed-worktree-system/blob/main/OPERATIONS.md
+    about: Review the standard managed-worktree operating flow before filing.

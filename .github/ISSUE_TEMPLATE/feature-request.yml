@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a new workflow, command, or policy capability.
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What workflow breaks down today
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired command, policy, or flow
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other tools or workarounds already tried

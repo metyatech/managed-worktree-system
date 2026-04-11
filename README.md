@@ -1,6 +1,6 @@
 # Managed Worktree System
 
-`managed-worktree-system` is a policy-driven Git worktree CLI for parallel human and AI task work. The executable is `mwt`.
+`@metyatech/managed-worktree-system` is a policy-driven Git worktree CLI for parallel human and AI task work. The executable is `mwt`.
 
 ## Purpose
 
@@ -15,7 +15,21 @@
 - Git and Node.js 22 or later are required
 - the command surface is intended to remain cross-platform where Git behavior permits
 
-## Setup
+## Install
+
+Global install:
+
+```powershell
+npm install -g @metyatech/managed-worktree-system
+```
+
+One-shot execution without a global install:
+
+```powershell
+npx @metyatech/managed-worktree-system --version
+```
+
+Repository-local development install:
 
 1. Install Node.js 22 or later.
 2. Install Git.
@@ -29,39 +43,41 @@ Core flow:
 1. Initialize an existing repository:
 
    ```powershell
-   npm exec -- mwt init --base main --remote origin
+   mwt init --base main --remote origin
    ```
 
 2. Create a task worktree:
 
    ```powershell
-   npm exec -- mwt create feature-auth
+   mwt create feature-auth
    ```
 
 3. Work and commit inside the task worktree, then deliver:
 
    ```powershell
-   npm exec -- mwt deliver feature-auth --target main
+   mwt deliver feature-auth --target main
    ```
 
 4. Prune delivered worktrees:
 
    ```powershell
-   npm exec -- mwt prune --merged --with-branches
+   mwt prune --merged --with-branches
    ```
 
 End-to-end example:
 
 ```powershell
-npm exec -- mwt init --base main --remote origin
-npm exec -- mwt create feature-auth
-npm exec -- mwt create preview-auth --dry-run --json
-npm exec -- mwt list --kind task --status active --json
-npm exec -- mwt deliver feature-auth --target main
-npm exec -- mwt sync --base main
-npm exec -- mwt prune --merged --with-branches
-npm exec -- mwt doctor --fix
+mwt init --base main --remote origin
+mwt create feature-auth
+mwt create preview-auth --dry-run --json
+mwt list --kind task --status active --json
+mwt deliver feature-auth --target main
+mwt sync --base main
+mwt prune --merged --with-branches
+mwt doctor --fix
 ```
+
+If you prefer not to install globally, replace `mwt` with `npm exec -- mwt` inside a local clone or with `npx @metyatech/managed-worktree-system`.
 
 ### Commands
 
@@ -78,7 +94,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt init --base main --remote origin --json
+mwt init --base main --remote origin --json
 ```
 
 #### `mwt create <name>`
@@ -97,7 +113,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt create feature-auth --base main --copy-profile local
+mwt create feature-auth --base main --copy-profile local
 ```
 
 #### `mwt list`
@@ -113,7 +129,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt list --kind task --status active --json
+mwt list --kind task --status active --json
 ```
 
 #### `mwt deliver [<name>]`
@@ -130,7 +146,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt deliver feature-auth --target main --json
+mwt deliver feature-auth --target main --json
 ```
 
 #### `mwt sync`
@@ -144,7 +160,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt sync --base main
+mwt sync --base main
 ```
 
 #### `mwt prune`
@@ -161,7 +177,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt prune --merged --with-branches --json
+mwt prune --merged --with-branches --json
 ```
 
 #### `mwt doctor`
@@ -176,7 +192,7 @@ Parameters:
 Example:
 
 ```powershell
-npm exec -- mwt doctor --fix --json
+mwt doctor --fix --json
 ```
 
 #### `mwt version`
@@ -186,7 +202,7 @@ Print the CLI version.
 Example:
 
 ```powershell
-npm exec -- mwt version
+mwt version
 ```
 
 ### Global flags
@@ -213,15 +229,35 @@ npm exec -- mwt version
 
 - None required.
 
+## Operations
+
+Operational guidance lives in [OPERATIONS.md](OPERATIONS.md). Read it before adopting `mwt` in a shared repository.
+
+## SemVer policy
+
+- Major releases change the CLI contract, JSON envelope, on-disk `.mwt/` format, or seeded-worktree policy in a backward-incompatible way.
+- Minor releases add backward-compatible commands, flags, policy checks, or workflow automation.
+- Patch releases fix bugs, tighten validation, or improve documentation without breaking an existing workflow contract.
+
 ## Release / deploy
 
-- The package is verified for installability with `npm run package:check`, but it is not published yet.
+Release flow for maintainers:
+
+1. Update version metadata and `CHANGELOG.md`.
+2. Run `npm run verify`.
+3. Push `main`.
+4. Create a Git tag that matches the package version, for example `v1.0.0`.
+5. Create a GitHub Release for that tag.
+6. Publish with `npm publish`.
+7. Verify the published artifact with `npm view`, `npx`, and a global install or update.
 
 ## Links
 
 - [Managed Worktree System Design](docs/managed-worktree-system-design.md)
 - [Managed Worktree System Implementation Spec v1](docs/managed-worktree-system-implementation-spec-v1.md)
+- [Operations Runbook](OPERATIONS.md)
 - [CHANGELOG.md](CHANGELOG.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
 - [LICENSE](LICENSE)

@@ -177,21 +177,21 @@ If `<name>` is omitted, `deliver` operates on the current worktree.
 
 Exit codes MUST be deterministic across commands.
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Success |
-| `1` | Generic failure |
-| `2` | Invalid CLI usage or validation of CLI arguments failed |
-| `3` | Repository is not initialized for managed-worktree-system |
-| `4` | Seed worktree policy violation |
-| `5` | Task worktree policy violation |
-| `6` | Hook failure |
-| `7` | Verification failure |
-| `8` | Git conflict during rebase or merge-like operation |
-| `9` | Remote push rejected or remote sync failure |
-| `10` | Requested managed worktree not found |
-| `11` | Unsafe prune target |
-| `12` | Unsupported repository state during `init` migration |
+| Code | Meaning                                                                   |
+| ---- | ------------------------------------------------------------------------- |
+| `0`  | Success                                                                   |
+| `1`  | Generic failure                                                           |
+| `2`  | Invalid CLI usage or validation of CLI arguments failed                   |
+| `3`  | Repository is not initialized for managed-worktree-system                 |
+| `4`  | Seed worktree policy violation                                            |
+| `5`  | Task worktree policy violation                                            |
+| `6`  | Hook failure                                                              |
+| `7`  | Verification failure                                                      |
+| `8`  | Git conflict during rebase or merge-like operation                        |
+| `9`  | Remote push rejected or remote sync failure                               |
+| `10` | Requested managed worktree not found                                      |
+| `11` | Unsafe prune target                                                       |
+| `12` | Unsupported repository state during `init` migration                      |
 | `13` | Another managed-worktree operation is already holding the repository lock |
 
 ## Output Contract
@@ -211,7 +211,7 @@ Every command MUST emit a single JSON object with this envelope:
   "ok": true,
   "command": "create",
   "timestamp": "2026-04-10T12:00:00.000Z",
-  "repoRoot": "D:/ghws/example-repo",
+  "repoRoot": "<workspace>/example-repo",
   "code": 0,
   "result": {}
 }
@@ -224,15 +224,13 @@ Error responses use the same envelope:
   "ok": false,
   "command": "sync",
   "timestamp": "2026-04-10T12:00:00.000Z",
-  "repoRoot": "D:/ghws/example-repo",
+  "repoRoot": "<workspace>/example-repo",
   "code": 4,
   "error": {
     "id": "seed_tracked_dirty",
     "message": "Seed worktree has tracked changes and cannot be synchronized.",
     "details": {
-      "changedFiles": [
-        "README.md"
-      ],
+      "changedFiles": ["README.md"],
       "recovery": "Move tracked edits into a task worktree or discard them, then rerun mwt sync."
     }
   }
@@ -320,8 +318,8 @@ This file exists in every managed worktree.
   "version": 1,
   "kind": "seed",
   "repoId": "metyatech/managed-worktree-system",
-  "repoRoot": "D:/ghws/managed-worktree-system",
-  "bareGitDir": "D:/ghws/managed-worktree-system/.bare",
+  "repoRoot": "<workspace>/managed-worktree-system",
+  "bareGitDir": "<workspace>/managed-worktree-system/.bare",
   "defaultBranch": "main",
   "defaultRemote": "origin"
 }
@@ -334,11 +332,11 @@ This file exists in every managed worktree.
   "version": 1,
   "kind": "task",
   "repoId": "metyatech/managed-worktree-system",
-  "repoRoot": "D:/ghws/managed-worktree-system",
+  "repoRoot": "<workspace>/managed-worktree-system",
   "worktreeName": "feat-bootstrap",
   "worktreeSlug": "feat-bootstrap",
   "worktreeId": "a1b2c3d4",
-  "worktreePath": "D:/ghws/managed-worktree-system-wt-feat-bootstrap-a1b2c3d4",
+  "worktreePath": "<workspace>/managed-worktree-system-wt-feat-bootstrap-a1b2c3d4",
   "branch": "wt/feat-bootstrap/a1b2c3d4",
   "baseBranch": "main",
   "targetBranch": "main",
@@ -393,7 +391,7 @@ Tracks the current registry of managed task worktrees:
       "worktreeId": "a1b2c3d4",
       "name": "feat-bootstrap",
       "branch": "wt/feat-bootstrap/a1b2c3d4",
-      "path": "D:/ghws/managed-worktree-system-wt-feat-bootstrap-a1b2c3d4",
+      "path": "<workspace>/managed-worktree-system-wt-feat-bootstrap-a1b2c3d4",
       "status": "active"
     }
   ]
@@ -485,8 +483,8 @@ Hook stdin JSON MUST include:
 {
   "version": 1,
   "hookType": "pre_create",
-  "repoRoot": "D:/ghws/example",
-  "seedPath": "D:/ghws/example",
+  "repoRoot": "<workspace>/example",
+  "seedPath": "<workspace>/example",
   "defaultBranch": "main",
   "defaultRemote": "origin",
   "worktree": {
@@ -494,7 +492,7 @@ Hook stdin JSON MUST include:
     "name": "feat-bootstrap",
     "slug": "feat-bootstrap",
     "id": "a1b2c3d4",
-    "path": "D:/ghws/example-wt-feat-bootstrap-a1b2c3d4",
+    "path": "<workspace>/example-wt-feat-bootstrap-a1b2c3d4",
     "branch": "wt/feat-bootstrap/a1b2c3d4",
     "baseBranch": "main",
     "targetBranch": "main"

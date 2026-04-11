@@ -1,9 +1,30 @@
 {
-  "name": "managed-worktree-system",
-  "private": true,
-  "version": "0.1.0",
+  "name": "@metyatech/managed-worktree-system",
+  "version": "1.0.0",
   "type": "module",
   "description": "Managed Git worktree CLI for parallel human and AI task work with a clean seed checkout.",
+  "license": "MIT",
+  "author": "metyatech",
+  "homepage": "https://github.com/metyatech/managed-worktree-system#readme",
+  "bugs": {
+    "url": "https://github.com/metyatech/managed-worktree-system/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metyatech/managed-worktree-system.git"
+  },
+  "keywords": [
+    "agent-tool",
+    "ai",
+    "cli",
+    "developer-tools",
+    "git",
+    "git-worktree",
+    "worktree"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22"
   },
