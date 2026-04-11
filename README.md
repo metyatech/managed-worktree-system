@@ -9,6 +9,22 @@
 - preserve repository-relative filesystem topology such as `../shared-repo`
 - make delivery explicit: rebase, verify, push, sync, and cleanup
 
+## Mental model
+
+- The seed is a normal non-bare repository checkout at the visible project root.
+- The seed stays tracked-clean and acts as the bootstrap source for ignored local files such as `.env.local`.
+- Every tracked edit happens in sibling task worktrees created by `mwt create`.
+- `mwt deliver` is the explicit integration step from a task worktree back to the target branch.
+
+## Migrating from 1.x
+
+`mwt` 1.x used a bare-backed seed layout. `mwt` 2.x does not. There is no in-place migration command in 2.x.
+
+- Start from a normal non-bare repository checkout that you want to keep as the seed.
+- Confirm there are no active task worktrees you still need from the old 1.x layout.
+- Run `mwt init` in the normal repository checkout.
+- Recreate task worktrees from that seed with `mwt create`.
+
 ## Supported environments
 
 - Windows PowerShell is the currently verified operator environment
@@ -84,7 +100,7 @@ If you prefer not to install globally, replace `mwt` with `npm exec -- mwt` insi
 
 #### `mwt init`
 
-Initialize the current repository for managed worktree operation.
+Initialize the current normal non-bare repository for managed worktree operation.
 
 Parameters:
 
@@ -136,6 +152,17 @@ mwt list --kind task --status active --json
 #### `mwt deliver [<name>]`
 
 Rebase a task worktree onto the remote target branch, run verification, push, and sync the seed worktree.
+
+`deliver` is not just "push this branch". It is the explicit integration gate that:
+
+1. fetches the target branch
+2. rebases the task worktree onto the latest target
+3. runs pre-deliver hooks
+4. runs the configured verify command in the rebased task worktree
+5. pushes `HEAD` to the target branch
+6. fast-forwards the seed to the delivered target
+
+This verify step is intentional. A pre-commit hook checks each commit in isolation, but `deliver` verifies the code after rebasing onto the latest target branch. That catches integration failures that a local pre-commit hook cannot see. Use both when possible: pre-commit for early feedback, `deliver` verify for the final integration gate.
 
 Parameters:
 
@@ -216,6 +243,23 @@ mwt version
 - `--verbose` or `-v`: reserve verbose logging for future expansion.
 - `--help` or `-h`: show help for the top-level CLI or a specific command.
 - `--version` or `-V`: print the CLI version.
+
+## Project configuration
+
+Project policy lives in `.mwt/config.toml`.
+
+- `default_branch`: default base and delivery target branch, usually `main`.
+- `default_remote`: default remote, usually `origin`.
+- `task_worktree_dir_template`: path template for sibling task worktrees. Available tokens are `repo`, `seed_root`, `seed_parent`, `slug`, and `shortid`.
+- `task_branch_template`: local task branch name template. Available tokens are `slug` and `shortid`.
+- `bootstrap.enabled`: default on or off switch for ignored-file bootstrap copy.
+- `bootstrap.default_profile`: default bootstrap profile name.
+- `bootstrap.profiles.<name>.include`: allowlisted glob patterns to copy from the seed, such as `.env.local`.
+- `bootstrap.profiles.<name>.exclude`: excluded globs inside that profile, such as `node_modules/` or `dist/`.
+- `verify.command`: command that `mwt deliver` runs after rebasing onto the latest target branch.
+- `hooks.pre_create.*`, `hooks.post_create.*`, `hooks.pre_deliver.*`, `hooks.post_deliver.*`: named project hooks for lifecycle automation.
+
+The full schema and examples are documented in [docs/managed-worktree-system-implementation-spec-v1.md](docs/managed-worktree-system-implementation-spec-v1.md).
 
 ## Development commands
 

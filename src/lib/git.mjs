@@ -30,6 +30,16 @@ export async function getGitDir(cwd) {
   return result.stdout.trim();
 }
 
+export async function getGitPath(cwd, relativePath) {
+  const result = await gitOk(['rev-parse', '--git-path', relativePath], { cwd });
+  return result.stdout.trim();
+}
+
+export async function isBareRepository(cwd) {
+  const result = await gitOk(['rev-parse', '--is-bare-repository'], { cwd });
+  return result.stdout.trim() === 'true';
+}
+
 export async function getCurrentBranch(cwd) {
   const result = await gitOk(['branch', '--show-current'], { cwd });
   return result.stdout.trim();

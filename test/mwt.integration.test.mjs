@@ -7,6 +7,7 @@ import { pathExists } from '../src/lib/fs.mjs';
 import { MWT_MARKER_FILE } from '../src/lib/constants.mjs';
 import {
   cliPath,
+  createTempDir,
   createRepoWithRemote,
   readJson,
   run,
@@ -15,19 +16,48 @@ import {
   waitForPath,
 } from './helpers.mjs';
 
-test('mwt init creates bare-backed managed layout and doctor passes', async () => {
+test('mwt init keeps the seed as a normal non-bare repo and doctor passes', async () => {
   const fixture = await createRepoWithRemote();
 
   const initResult = await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.ok, true);
-  assert.equal(await pathExists(path.join(fixture.repoDir, '.bare')), true);
+  assert.equal(await pathExists(path.join(fixture.repoDir, '.bare')), false);
+  assert.equal(await pathExists(path.join(fixture.repoDir, '.git')), true);
   assert.equal(await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')), true);
   assert.equal(await pathExists(path.join(fixture.repoDir, MWT_MARKER_FILE)), true);
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--json']);
+  const marker = await readJson(path.join(fixture.repoDir, MWT_MARKER_FILE));
+  assert.equal('bareGitDir' in marker, false);
+
+  const excludePath = path.join(fixture.repoDir, '.git', 'info', 'exclude');
+  const excludeContent = await readFile(excludePath, 'utf8');
+  assert.match(excludeContent, /\.mwt\/state\//u);
+  assert.match(excludeContent, /\.mwt\/logs\//u);
+
+  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--deep', '--json']);
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(doctorJson.result.issues.length, 0);
+});
+
+test('mwt init rejects a linked worktree as the seed', async () => {
+  const fixture = await createRepoWithRemote();
+  const linkedPath = path.join(fixture.rootDir, 'linked-seed');
+  await runGit(fixture.repoDir, ['worktree', 'add', linkedPath, '-b', 'linked-seed']);
+
+  const initResult = await runCli(linkedPath, ['init', '--json'], 12);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.error.id, 'init_requires_primary_repo');
+});
+
+test('mwt init rejects a bare repository', async () => {
+  const rootDir = await createTempDir('mwt-bare-fixture');
+  const bareDir = path.join(rootDir, 'repo.git');
+  await runGit(rootDir, ['init', '--bare', bareDir]);
+
+  const initResult = await runCli(bareDir, ['init', '--json'], 12);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.error.id, 'init_requires_non_bare_repo');
 });
 
 test('mwt create makes sibling task worktree and copies allowlisted ignored bootstrap files', async () => {

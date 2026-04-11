@@ -1,6 +1,6 @@
 # Managed Worktree System Design
 
-**Conclusion first:** build a **thin policy layer on top of Git worktrees**, not a new Git replacement. Use a **bare-backed seed worktree at the repository root**, create **named sibling task worktrees** for all human and AI edits, and use an explicit **deliver pipeline** that rebases, verifies, pushes, and then fast-forwards the seed worktree.
+**Conclusion first:** build a **thin policy layer on top of Git worktrees**, not a new Git replacement. Use a **normal non-bare seed repository at the repository root**, create **named sibling task worktrees** for all human and AI edits, and use an explicit **deliver pipeline** that rebases, verifies, pushes, and then fast-forwards the seed worktree.
 
 This design is based on a concrete review of **Worktrunk** and **gh-worktree** as of 2026-04-10. The goal is to keep the visible repository root **clean, current, and usable as the bootstrap source**, while still supporting parallel human and AI work safely.
 
@@ -61,12 +61,11 @@ Reviewed and probed:
 
 - `init`
 - `create`
-- bare-repository layout
+- repository/worktree split
 - hooks and templates model
 
 Strong ideas worth adopting:
 
-- bare Git storage as the canonical store
 - project-local hook and template directories
 - clean separation between Git state and working trees
 
@@ -82,7 +81,7 @@ Primary reference:
 
 ## Decision
 
-Adopt the **topology** from gh-worktree and the **operator ergonomics** from Worktrunk, then add a small custom policy layer for the missing invariants:
+Adopt the **operator ergonomics** from Worktrunk, keep gh-worktree only as a reference point for explicit worktree policy, and then add a small custom policy layer for the missing invariants:
 
 - remote delivery
 - root-worktree cleanliness enforcement
@@ -90,13 +89,13 @@ Adopt the **topology** from gh-worktree and the **operator ergonomics** from Wor
 - safe naming and cleanup of temporary task worktrees
 - bootstrap rules for ignored local files
 
-A concrete Windows probe also showed that these choices are not in tension: a **bare-backed repository layout** and **Worktrunk-style day-to-day worktree operations** can coexist. That makes it reasonable to treat the two tools as complementary design inputs rather than competing end states.
+A concrete Windows probe showed that Git worktree policy, allowlisted bootstrap copy, and explicit delivery do not require a bare-backed topology. The important part is the policy layer, not relocating the Git store.
 
 ## Chosen Architecture
 
 ### High-level model
 
-- **Canonical Git store:** a bare repository at `.bare/`
+- **Canonical Git store:** the seed repository's normal `.git/` directory
 - **Seed worktree:** the visible repository root, on a declared base branch such as `main`
 - **Task worktrees:** sibling directories created next to the repository root
 - **Delivery model:** deliver from the task worktree itself; do **not** create a second integration worktree in v1
@@ -110,7 +109,7 @@ The root worktree is still useful:
 - machine-local files such as `.env.local` can live there
 - relative paths like `../course-content` keep the same meaning when task worktrees are siblings
 
-The bare repository is the canonical Git store, but the root worktree is the canonical **human-visible base**.
+The root repository is both the canonical Git store and the canonical **human-visible base**, but policy keeps tracked edits out of it.
 
 ## Project Contract
 
@@ -132,8 +131,8 @@ actors:
     primary_goal: Create, use, deliver, and clean up isolated task worktrees through a scriptable CLI.
 
 canonical_store:
-  kind: bare-git-repository
-  location: .bare/
+  kind: non-bare-git-repository
+  location: .git/
   version_controlled: true
 
 human_surface:
@@ -150,7 +149,7 @@ ai_surface:
   target: managed-worktree-cli
 
 sync:
-  source_of_truth: bare_git_store
+  source_of_truth: seed_git_store
   edit_flow:
     human: task_worktree_only
     ai: task_worktree_only
@@ -206,8 +205,7 @@ acceptance:
 
 ```text
 repo-root/
-  .bare/                 # bare Git directory; source of truth for refs and objects
-  .git                   # gitdir pointer to .bare
+  .git/                  # normal Git directory for the seed repository
   .mwt/
     config.toml          # versioned project config
     hooks/               # versioned project hook scripts
@@ -262,14 +260,14 @@ Required CLI properties:
 Purpose:
 
 - convert or initialize a repository into the managed topology
-- create `.bare/`, `.mwt/`, and marker files
+- create `.mwt/` and marker files
 - declare the seed branch
 - install hooks and ignore rules
 
 Key rules:
 
 - the repository root becomes the seed worktree
-- `.git` becomes a pointer to `.bare`
+- `.git` stays the normal Git directory for the seed repository
 - ignored runtime state under `.mwt/state/` and `.mwt/logs/` is added to the local Git exclude rules
 - project config stays versioned; runtime state stays ignored
 
@@ -411,7 +409,7 @@ State should record:
 ### Reuse as design references
 
 - Worktrunk hook/config/copy-ignored ergonomics
-- gh-worktree bare-backed topology
+- gh-worktree as a contrastive reference for worktree-first policy design
 
 ### Build ourselves
 

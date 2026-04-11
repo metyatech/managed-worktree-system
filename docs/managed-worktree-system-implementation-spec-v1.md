@@ -1,6 +1,6 @@
 # Managed Worktree System Implementation Spec v1
 
-**Conclusion first:** `managed-worktree-system` v1 should be implemented as a **single CLI policy layer over Git** with a **bare-backed seed worktree**, **named sibling task worktrees**, **explicit JSON output**, and **strict seed cleanliness enforcement**. The system should copy only allowlisted ignored bootstrap files, stop explicitly on conflicts or policy violations, and deliver directly from the task worktree to the remote target branch before fast-forwarding the seed worktree.
+**Conclusion first:** `managed-worktree-system` v1 should be implemented as a **single CLI policy layer over Git** with a **normal non-bare seed repository**, **named sibling task worktrees**, **explicit JSON output**, and **strict seed cleanliness enforcement**. The system should copy only allowlisted ignored bootstrap files, stop explicitly on conflicts or policy violations, and deliver directly from the task worktree to the remote target branch before fast-forwarding the seed worktree.
 
 This document is the **implementation-level companion** to [Managed Worktree System Design](managed-worktree-system-design.md). The design document explains the architecture. This specification defines the concrete contracts needed to start implementation without inventing behavior ad hoc.
 
@@ -55,14 +55,12 @@ Constraints we intentionally reject:
 
 `gh-worktree` is strongest where we need **topology**:
 
-- bare repo as the Git source of truth
-- root `.git` pointer to `.bare/`
+- explicit repository/worktree separation
 - project-local hooks and templates
 - checksum-gated executable hooks
 
 Constraints we intentionally keep:
 
-- bare-backed repository layout
 - project-local bootstrap and hook directories
 - explicit lifecycle points around create/remove
 
@@ -76,7 +74,7 @@ Constraints we intentionally reject:
 
 v1 MUST satisfy these invariants:
 
-- one canonical Git store: `.bare/`
+- one canonical Git store: the seed repository's normal `.git/`
 - one seed worktree: repository root
 - all tracked edits happen only in task worktrees
 - task worktrees are siblings of the seed worktree
@@ -87,7 +85,7 @@ v1 MUST satisfy these invariants:
 
 ## Terminology
 
-- **Canonical store**: the bare Git repository at `.bare/`
+- **Canonical store**: the seed repository's normal `.git/`
 - **Seed worktree**: the visible repository root
 - **Task worktree**: a managed sibling worktree created for human or AI task work
 - **Managed worktree**: either the seed or a task worktree with a valid `.mwt-worktree.json`
@@ -191,7 +189,7 @@ Exit codes MUST be deterministic across commands.
 | `9`  | Remote push rejected or remote sync failure                               |
 | `10` | Requested managed worktree not found                                      |
 | `11` | Unsafe prune target                                                       |
-| `12` | Unsupported repository state during `init` migration                      |
+| `12` | Unsupported repository state during `init`                                |
 | `13` | Another managed-worktree operation is already holding the repository lock |
 
 ## Output Contract
@@ -241,7 +239,6 @@ Error responses use the same envelope:
 
 ```text
 repo-root/
-  .bare/
   .git
   .mwt/
     config.toml
@@ -319,7 +316,6 @@ This file exists in every managed worktree.
   "kind": "seed",
   "repoId": "metyatech/managed-worktree-system",
   "repoRoot": "<workspace>/managed-worktree-system",
-  "bareGitDir": "<workspace>/managed-worktree-system/.bare",
   "defaultBranch": "main",
   "defaultRemote": "origin"
 }
@@ -528,17 +524,16 @@ Behavior:
 
 1. Resolve current default branch and remote.
 2. Verify root tracked files are clean unless `--force` is supplied.
-3. Move the Git dir to `.bare/`.
-4. Write a `.git` pointer file that targets `.bare`.
-5. Create `.mwt/` directories.
-6. Create `.mwt/config.toml` if absent.
-7. Create the seed `.mwt-worktree.json`.
-8. Create ignored state/log paths and update local Git exclude rules if required.
-9. Record `seed.json`.
+3. Verify the repository is a normal non-bare primary checkout.
+4. Create `.mwt/` directories.
+5. Create `.mwt/config.toml` if absent.
+6. Create the seed `.mwt-worktree.json`.
+7. Create ignored state/log paths and update local Git exclude rules if required.
+8. Record `seed.json`.
 
 Failure rule:
 
-- if migration cannot complete atomically, restore the original Git layout and return exit code `12`
+- if initialization cannot complete atomically, leave the repository unchanged and return exit code `12`
 
 ### `mwt create`
 
@@ -626,7 +621,7 @@ Behavior:
 
 Behavior:
 
-- verify `.bare/`, `.git`, `.mwt/config.toml`, and the seed marker are coherent
+- verify `.git`, `.mwt/config.toml`, and the seed marker are coherent
 - verify every registered task worktree still exists
 - detect stale registry entries
 - detect stale directories matching the naming pattern but missing markers
@@ -672,6 +667,12 @@ Human-readable progress logs go to stderr.
 Sensitive values from copied `.env*` files MUST NOT be echoed into logs.
 
 ## Recovery Rules
+
+## Migration Rules
+
+- v1 bare-backed seeds from the 1.x release line are not a supported seed topology in the non-bare release line.
+- v2 MUST fail explicitly on a bare seed or redirected seed Git dir instead of trying an in-place migration.
+- The supported migration path is: create or choose a normal non-bare repository checkout, run `mwt init`, and recreate task worktrees from that seed.
 
 ### Seed worktree dirty
 

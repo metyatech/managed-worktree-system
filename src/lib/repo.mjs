@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { cp, readdir, rename } from 'node:fs/promises';
+import { cp, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { Minimatch } from 'minimatch';
@@ -43,12 +43,13 @@ import {
   getAheadBehind,
   getCurrentBranch,
   getGitDir,
+  getGitPath,
   getHeadCommit,
   getRepoRoot,
   getUpstreamBranch,
-  gitOk,
   hasMergeConflicts,
   hasTrackedChanges,
+  isBareRepository,
   isBranchMerged,
   listTrackedChanges,
   listUntrackedChanges,
@@ -106,8 +107,6 @@ export function getManagedPaths(seedRoot) {
     worktreeStatePath: path.join(seedRoot, WORKTREE_STATE_FILE),
     lastDeliverPath: path.join(seedRoot, LAST_DELIVER_STATE_FILE),
     lastSyncPath: path.join(seedRoot, LAST_SYNC_STATE_FILE),
-    bareGitDir: path.join(seedRoot, '.bare'),
-    localExcludePath: path.join(seedRoot, '.bare', 'info', 'exclude'),
   };
 }
 
@@ -293,7 +292,10 @@ export async function ensureManagedDirs(seedRoot) {
 }
 
 export async function ensureLocalExcludeEntries(seedRoot, entries = DEFAULT_IGNORED_ENTRIES) {
-  const { localExcludePath } = getManagedPaths(seedRoot);
+  const localExcludePath = path.resolve(
+    seedRoot,
+    await getGitPath(seedRoot, 'info/exclude'),
+  );
   const current = await readText(localExcludePath, '');
   const normalized = current.split(/\r?\n/u).filter(Boolean);
   let updated = current;
@@ -317,7 +319,6 @@ export async function writeSeedMarker(seedRoot, data) {
     kind: 'seed',
     repoId: data.repoId,
     repoRoot: toPortablePath(seedRoot),
-    bareGitDir: toPortablePath(managedPaths.bareGitDir),
     defaultBranch: data.defaultBranch,
     defaultRemote: data.defaultRemote,
   };
@@ -456,6 +457,26 @@ export async function initializeRepository(seedRoot, options = {}) {
     });
   }
 
+  if (await isBareRepository(seedRoot)) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_requires_non_bare_repo',
+      message: 'mwt init requires a normal non-bare repository as the seed worktree.',
+    });
+  }
+
+  const gitDir = await getGitDir(seedRoot);
+  if (gitDir !== '.git') {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_requires_primary_repo',
+      message: 'mwt init requires the primary non-bare repository checkout, not a linked worktree or redirected Git dir.',
+      details: {
+        gitDir,
+      },
+    });
+  }
+
   if (!(options.force) && (await hasTrackedChanges(seedRoot))) {
     throw new MwtError({
       code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
@@ -470,19 +491,6 @@ export async function initializeRepository(seedRoot, options = {}) {
   const defaultBranch = options.base ?? await getCurrentBranch(seedRoot);
   const defaultRemote = options.remote ?? 'origin';
   const verifyCommand = await discoverVerifyCommand(seedRoot);
-
-  const gitDir = await getGitDir(seedRoot);
-  if (gitDir !== '.bare') {
-    await rename(path.join(seedRoot, gitDir), managedPaths.bareGitDir);
-    await writeText(path.join(seedRoot, '.git'), 'gitdir: ./.bare');
-    await gitOk([
-      '--git-dir',
-      managedPaths.bareGitDir,
-      'config',
-      'core.worktree',
-      seedRoot,
-    ], { cwd: seedRoot });
-  }
 
   await ensureManagedDirs(seedRoot);
   const config = await writeDefaultConfig(seedRoot, {
@@ -686,6 +694,26 @@ export async function planInitializeRepository(seedRoot, options = {}) {
     });
   }
 
+  if (await isBareRepository(seedRoot)) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_requires_non_bare_repo',
+      message: 'mwt init requires a normal non-bare repository as the seed worktree.',
+    });
+  }
+
+  const gitDir = await getGitDir(seedRoot);
+  if (gitDir !== '.git') {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_requires_primary_repo',
+      message: 'mwt init requires the primary non-bare repository checkout, not a linked worktree or redirected Git dir.',
+      details: {
+        gitDir,
+      },
+    });
+  }
+
   if (!(options.force) && (await hasTrackedChanges(seedRoot))) {
     throw new MwtError({
       code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
@@ -700,7 +728,6 @@ export async function planInitializeRepository(seedRoot, options = {}) {
   const defaultBranch = options.base ?? await getCurrentBranch(seedRoot);
   const defaultRemote = options.remote ?? 'origin';
   const verifyCommand = await discoverVerifyCommand(seedRoot);
-  const gitDir = await getGitDir(seedRoot);
 
   return {
     dryRun: true,
@@ -709,12 +736,12 @@ export async function planInitializeRepository(seedRoot, options = {}) {
     defaultRemote,
     verifyCommand,
     actions: [
-      { id: 'move_git_dir', description: `Move ${gitDir} to .bare and rewrite .git pointer.` },
+      { id: 'validate_seed_repo', description: 'Verify the seed repository is a clean primary non-bare checkout.' },
       { id: 'create_managed_dirs', description: 'Create .mwt directories for config, state, locks, logs, hooks, and templates.' },
       { id: 'write_config', description: 'Write .mwt/config.toml with default branch, remote, and verify command.' },
       { id: 'write_seed_marker', description: 'Write the seed .mwt-worktree.json marker.' },
       { id: 'write_seed_state', description: 'Write seed.json and initialize worktrees.json.' },
-      { id: 'update_local_exclude', description: 'Add managed runtime paths to .bare/info/exclude.' },
+      { id: 'update_local_exclude', description: 'Add managed runtime paths to .git/info/exclude.' },
     ],
   };
 }
@@ -1446,20 +1473,20 @@ async function assessDoctorRepository(seedRoot, options = {}) {
   }
 
   if (options.deep) {
-    if (!(await pathExists(managedPaths.bareGitDir))) {
+    if (await isBareRepository(seedRoot)) {
       issues.push({
-        id: 'missing_bare_git_dir',
+        id: 'unexpected_bare_repository',
         severity: 'error',
-        message: 'The .bare Git directory is missing.',
+        message: 'The seed repository is bare, but mwt requires a normal non-bare seed checkout.',
       });
     }
 
     const gitDir = await getGitDir(seedRoot);
-    if (gitDir !== '.bare') {
+    if (gitDir !== '.git') {
       issues.push({
         id: 'unexpected_git_dir',
         severity: 'error',
-        message: 'The seed worktree .git pointer is not targeting .bare.',
+        message: 'The seed repository is not using a normal .git directory.',
         details: {
           gitDir,
         },

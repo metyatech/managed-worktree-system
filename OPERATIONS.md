@@ -40,7 +40,7 @@ Not allowed in the seed worktree:
 Use one parent directory per project family or repository cluster. Inside that parent:
 
 - place each seed worktree at a normal repository path
-- let `mwt` keep the canonical bare Git store at `.bare/` inside that seed worktree
+- keep the seed as a normal non-bare repository checkout
 - let `mwt create` place task worktrees as siblings of the seed worktree
 
 Example:
@@ -49,7 +49,7 @@ Example:
 workspace/
   course-stack/
     workspace-agent-hub/                 # seed worktree; humans inspect here
-      .bare/                             # canonical Git store; do not edit directly
+      .git/
       .mwt/
       .mwt-worktree.json
       .env.local
@@ -64,13 +64,17 @@ This layout is recommended because:
 - humans can keep using a normal visible repository path
 - `../other-repo` style relative paths keep the same meaning in task worktrees
 - cleanup is easy because task worktrees are visibly grouped next to the seed worktree
-- the bare Git store stays local to the repository instead of becoming a hidden global dependency
+- it works with normal Git repository expectations instead of introducing a second Git-storage concept
+
+Migration note:
+
+- `mwt` 1.x bare-backed seeds are not a supported seed layout in 2.x.
+- Recreate the managed setup from a normal non-bare repository checkout and then recreate task worktrees.
 
 Avoid these layouts:
 
 - placing the seed worktree directly under a crowded global root where unrelated task worktrees from many projects mix together
 - placing task worktrees under a nested child of the seed worktree, which breaks sibling-relative topology
-- editing inside `.bare/`
 - treating the seed worktree as a general coding workspace
 
 ## Standard operator flow
@@ -81,6 +85,8 @@ Avoid these layouts:
 4. Commit inside the task worktree.
 5. Run `mwt deliver <task-name> --target <branch>`.
 6. If delivery succeeds, run `mwt prune --merged --with-branches`.
+
+`deliver` is the integration boundary. It rebases the task worktree onto the latest target branch, runs the configured verify command, pushes to the target branch, and then fast-forwards the seed. This is why `deliver` still runs verify even when the repository already has pre-commit hooks.
 
 ## Human workflow
 

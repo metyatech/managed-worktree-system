@@ -37,7 +37,6 @@ export const EXIT_CODES = Object.freeze({
 export const DEFAULT_BOOTSTRAP_PROFILE = 'local';
 
 export const DEFAULT_IGNORED_ENTRIES = [
-  '.bare/',
   '.mwt/state/',
   '.mwt/logs/',
 ];

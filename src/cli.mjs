@@ -27,6 +27,7 @@ import {
   pruneWorktrees,
   syncSeed,
 } from './lib/repo.mjs';
+import { getRepoRoot, isBareRepository } from './lib/git.mjs';
 import { toPortablePath, writeJson } from './lib/fs.mjs';
 import { withLock } from './lib/locks.mjs';
 
@@ -36,7 +37,7 @@ Usage:
   mwt <command> [options]
 
 Commands:
-  init       Initialize the current repository for managed-worktree-system
+  init       Initialize the current normal non-bare repository for managed-worktree-system
   create     Create a managed sibling task worktree
   list       List Git worktrees and managed metadata
   deliver    Deliver a managed task worktree to its target branch
@@ -237,8 +238,56 @@ async function writeCommandResult(outputOptions, envelope, stderr) {
   }
 }
 
+async function resolveInitRoot(cwd) {
+  try {
+    return await getRepoRoot(cwd);
+  } catch {
+    if (await isBareRepository(cwd).catch(() => false)) {
+      return cwd;
+    }
+
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_requires_git_repository',
+      message: 'mwt init must be run from the root of a Git repository.',
+    });
+  }
+}
+
 async function runCommand(command, parsed) {
   const { values, positionals } = parsed;
+
+  if (command === 'init') {
+    const repoRoot = await resolveInitRoot(process.cwd());
+
+    if (values['dry-run']) {
+      return {
+        repoRoot,
+        result: {
+          ...(await planInitializeRepository(repoRoot, {
+            base: values.base,
+            remote: values.remote,
+            force: values.force,
+          })),
+          summary: `Planned initialization for ${toPortablePath(repoRoot)}.`,
+        },
+      };
+    }
+
+    const result = await initializeRepository(repoRoot, {
+      base: values.base,
+      remote: values.remote,
+      force: values.force,
+    });
+    return {
+      repoRoot,
+      result: {
+        ...result,
+        summary: `Initialized managed-worktree-system in ${toPortablePath(repoRoot)}.`,
+      },
+    };
+  }
+
   const context = await detectContext(process.cwd());
   const runWithRepoLock = (work) => withLock(context.seedRoot, 'repo', { command }, work);
 
@@ -252,18 +301,6 @@ async function runCommand(command, parsed) {
 
   if (values['dry-run']) {
     switch (command) {
-      case 'init':
-        return {
-          repoRoot: context.worktreeRoot,
-          result: {
-            ...(await planInitializeRepository(context.worktreeRoot, {
-              base: values.base,
-              remote: values.remote,
-              force: values.force,
-            })),
-            summary: `Planned initialization for ${toPortablePath(context.worktreeRoot)}.`,
-          },
-        };
       case 'create': {
         const name = positionals[0] ?? values.name;
         if (!name) {
@@ -358,21 +395,6 @@ async function runCommand(command, parsed) {
   }
 
   switch (command) {
-    case 'init': {
-      const repoRoot = context.worktreeRoot;
-      const result = await initializeRepository(repoRoot, {
-        base: values.base,
-        remote: values.remote,
-        force: values.force,
-      });
-      return {
-        repoRoot,
-        result: {
-          ...result,
-          summary: `Initialized managed-worktree-system in ${toPortablePath(repoRoot)}.`,
-        },
-      };
-    }
     case 'create': {
       const name = positionals[0] ?? values.name;
       if (!name) {
@@ -520,9 +542,11 @@ async function main() {
     process.exitCode = EXIT_CODES.SUCCESS;
   } catch (error) {
     const mwtError = asMwtError(error);
-    const repoRoot = await detectContext(process.cwd())
-      .then((context) => context.seedRoot)
-      .catch(() => null);
+    const repoRoot = command === 'init'
+      ? await resolveInitRoot(process.cwd()).catch(() => null)
+      : await detectContext(process.cwd())
+        .then((context) => context.seedRoot)
+        .catch(() => null);
     const envelope = buildEnvelope(false, command, mwtError.code, repoRoot, {
       id: mwtError.id,
       message: mwtError.message,
