@@ -1,6 +1,6 @@
 {
   "name": "@metyatech/managed-worktree-system",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Managed Git worktree CLI for parallel human and AI task work with a clean seed checkout.",
   "license": "MIT",
@@ -29,6 +29,7 @@
     "node": ">=22"
   },
   "files": [
+    "bin/",
     "src/",
     "docs/",
     "README.md",
@@ -38,7 +39,7 @@
     "LICENSE"
   ],
   "bin": {
-    "mwt": "./src/cli.mjs"
+    "mwt": "bin/mwt.js"
   },
   "scripts": {
     "lint:docs": "npm exec -- markdownlint \"**/*.md\" --ignore node_modules",

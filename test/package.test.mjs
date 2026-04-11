@@ -10,14 +10,13 @@ import { readText } from '../src/lib/fs.mjs';
 import { runProcess } from '../src/lib/process.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+const packageJson = JSON.parse(
+  await readText(path.join(projectRoot, 'package.json')),
+);
 
 test('package metadata is ready for publication', async () => {
-  const packageJson = JSON.parse(
-    await readText(path.join(projectRoot, 'package.json')),
-  );
-
   assert.equal(packageJson.name, '@metyatech/managed-worktree-system');
-  assert.equal(packageJson.version, '1.0.0');
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
   assert.equal(packageJson.private, undefined);
   assert.equal(packageJson.license, 'MIT');
   assert.equal(packageJson.publishConfig?.access, 'public');
@@ -51,6 +50,7 @@ test('npm pack --dry-run includes only installable CLI files', async () => {
   const [packInfo] = JSON.parse(result.stdout);
   const packedPaths = packInfo.files.map((entry) => entry.path).sort();
 
+  assert.equal(packedPaths.includes('bin/mwt.js'), true);
   assert.equal(packedPaths.includes('src/cli.mjs'), true);
   assert.equal(packedPaths.includes('src/lib/repo.mjs'), true);
   assert.equal(packedPaths.includes('README.md'), true);
@@ -121,5 +121,5 @@ test('packed tarball exposes the mwt executable', async () => {
   );
 
   assert.equal(execResult.code, 0, execResult.stderr || execResult.stdout);
-  assert.match(execResult.stdout.trim(), /^1\.0\.0$/u);
+  assert.equal(execResult.stdout.trim(), packageJson.version);
 });
