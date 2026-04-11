@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-- No unreleased changes.
+- Export a supported JavaScript and TypeScript API for `mwt` repository
+  operations so other tools can create, deliver, and drop managed task
+  worktrees without shelling out.
+- Add per-call `pathTemplate` and `branchTemplate` overrides to the programmatic
+  task worktree creation flow so orchestrators can reserve manager-specific
+  naming without changing the seed repository defaults.
+- Add programmatic task worktree drop support and tests for manager-created task
+  worktrees.
 
 ## 2.0.0 - 2026-04-11
 

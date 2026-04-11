@@ -53,6 +53,54 @@ Repository-local development install:
 3. Run `npm install`.
 4. Run `npm run verify`.
 
+## Programmatic API
+
+`@metyatech/managed-worktree-system` also exports the core repository operations
+for other tools such as orchestrators and repository managers.
+
+Example:
+
+```js
+import {
+  createTaskWorktree,
+  deliverTaskWorktree,
+  dropTaskWorktree,
+  loadConfig,
+} from '@metyatech/managed-worktree-system';
+
+const seedRoot = process.cwd();
+await loadConfig(seedRoot);
+const created = await createTaskWorktree(seedRoot, 'manager-task-123', {
+  createdBy: 'manager',
+  pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
+  branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
+});
+
+await deliverTaskWorktree(created.worktreePath, { target: 'main' });
+await dropTaskWorktree(created.worktreePath, {
+  force: true,
+  deleteBranch: true,
+  forceBranchDelete: true,
+});
+```
+
+Programmatic create options:
+
+- `base`: override the configured base branch for this task worktree.
+- `target`: override the configured target branch recorded in task metadata.
+- `bootstrap`: force or skip bootstrap copying.
+- `copyProfile`: choose a bootstrap profile from `.mwt/config.toml`.
+- `createdBy`: record the logical creator in `.mwt-worktree.json`.
+- `pathTemplate`: override the configured task worktree path template for this
+  call.
+- `branchTemplate`: override the configured task branch template for this call.
+
+Programmatic delivery options:
+
+- `target`: override the delivery target branch for this call.
+- `allowDirtyTask`: skip the tracked-clean guard inside the task worktree.
+- `resume`: resume a previously interrupted or conflict-marked delivery.
+
 ## Usage
 
 Core flow:

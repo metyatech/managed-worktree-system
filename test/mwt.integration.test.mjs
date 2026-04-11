@@ -6,6 +6,11 @@ import test from 'node:test';
 import { pathExists } from '../src/lib/fs.mjs';
 import { MWT_MARKER_FILE } from '../src/lib/constants.mjs';
 import {
+  createTaskWorktree,
+  dropTaskWorktree,
+  initializeRepository,
+} from '../src/index.mjs';
+import {
   cliPath,
   createTempDir,
   createRepoWithRemote,
@@ -79,6 +84,26 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
   assert.equal(listJson.result.items.some((item) => item.kind === 'task'), true);
 });
 
+test('programmatic createTaskWorktree supports manager-specific path, branch, and createdBy overrides', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const created = await createTaskWorktree(fixture.repoDir, 'assign_q_1234_fix-queue', {
+    createdBy: 'manager',
+    pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
+    branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
+  });
+
+  assert.match(path.basename(created.worktreePath), /^repo-mgr-assign_q_1234_fix-queue-[0-9a-f]{8}$/u);
+  assert.match(created.branch, /^mgr\/assign_q_1234_fix-queue\/[0-9a-f]{8}$/u);
+
+  const marker = await readJson(path.join(created.worktreePath, MWT_MARKER_FILE));
+  assert.equal(marker.createdBy, 'manager');
+});
+
 test('mwt sync fails on dirty seed and fast-forwards clean seed after remote update', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
@@ -131,6 +156,33 @@ test('mwt deliver pushes committed task changes and prune removes delivered work
 
   const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
   assert.equal(state.items.length, 0);
+});
+
+test('programmatic dropTaskWorktree removes an active manager task worktree and deletes its branch', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+  const created = await createTaskWorktree(fixture.repoDir, 'drop-manager-task', {
+    createdBy: 'manager',
+    pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
+    branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
+  });
+
+  const dropped = await dropTaskWorktree(created.worktreePath, {
+    force: true,
+    deleteBranch: true,
+    forceBranchDelete: true,
+  });
+  assert.equal(dropped.branchDeleted, true);
+  assert.equal(await pathExists(created.worktreePath), false);
+
+  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
+
+  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', created.branch]);
+  assert.equal(branchCheck.stdout.trim(), '');
 });
 
 test('mwt doctor --fix rebuilds a missing worktree registry entry', async () => {

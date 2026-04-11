@@ -249,9 +249,18 @@ export function renderTemplate(template, values) {
 }
 
 export function renderTaskPath(seedRoot, config, slug, shortid) {
+  return renderTaskPathFromTemplate(
+    seedRoot,
+    config.task_worktree_dir_template,
+    slug,
+    shortid,
+  );
+}
+
+export function renderTaskPathFromTemplate(seedRoot, template, slug, shortid) {
   const repo = path.basename(seedRoot);
   const seedParent = path.resolve(path.dirname(seedRoot));
-  const rendered = renderTemplate(config.task_worktree_dir_template, {
+  const rendered = renderTemplate(template, {
     repo,
     seed_root: seedRoot,
     seed_parent: seedParent,
@@ -275,10 +284,21 @@ export function renderTaskPath(seedRoot, config, slug, shortid) {
 }
 
 export function renderTaskBranch(config, slug, shortid) {
-  return renderTemplate(config.task_branch_template, {
+  return renderTaskBranchFromTemplate(config.task_branch_template, slug, shortid);
+}
+
+export function renderTaskBranchFromTemplate(template, slug, shortid) {
+  return renderTemplate(template, {
     slug,
     shortid,
   });
+}
+
+function resolveTaskTemplates(config, options = {}) {
+  return {
+    pathTemplate: options.pathTemplate ?? config.task_worktree_dir_template,
+    branchTemplate: options.branchTemplate ?? config.task_branch_template,
+  };
 }
 
 export async function ensureManagedDirs(seedRoot) {
@@ -754,8 +774,18 @@ export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
   const targetBranch = options.target ?? config.default_branch;
   const slug = slugifyName(taskName);
   const previewId = 'preview000';
-  const worktreePath = renderTaskPath(seedRoot, config, slug, previewId);
-  const branch = renderTaskBranch(config, slug, previewId);
+  const templates = resolveTaskTemplates(config, options);
+  const worktreePath = renderTaskPathFromTemplate(
+    seedRoot,
+    templates.pathTemplate,
+    slug,
+    previewId,
+  );
+  const branch = renderTaskBranchFromTemplate(
+    templates.branchTemplate,
+    slug,
+    previewId,
+  );
 
   if (await pathExists(worktreePath)) {
     throw new MwtError({
@@ -874,8 +904,18 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   const targetBranch = options.target ?? config.default_branch;
   const slug = slugifyName(taskName);
   const shortid = createShortId();
-  const worktreePath = renderTaskPath(seedRoot, config, slug, shortid);
-  const branch = renderTaskBranch(config, slug, shortid);
+  const templates = resolveTaskTemplates(config, options);
+  const worktreePath = renderTaskPathFromTemplate(
+    seedRoot,
+    templates.pathTemplate,
+    slug,
+    shortid,
+  );
+  const branch = renderTaskBranchFromTemplate(
+    templates.branchTemplate,
+    slug,
+    shortid,
+  );
 
   if (await pathExists(worktreePath)) {
     throw new MwtError({
@@ -1248,6 +1288,100 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
   };
 }
 
+function buildAllowedUntrackedSet(item = null) {
+  return new Set([
+    MWT_MARKER_FILE,
+    ...(item?.bootstrapFiles ?? []),
+  ]);
+}
+
+async function collectUnexpectedUntracked(taskRoot, item = null) {
+  const untracked = await listUntrackedChanges(taskRoot);
+  const allowedUntracked = buildAllowedUntrackedSet(item);
+  return untracked.filter((entry) => !allowedUntracked.has(entry));
+}
+
+async function assertTaskDropSafe(taskRoot, item = null, force = false) {
+  if (!(await pathExists(taskRoot))) {
+    return;
+  }
+
+  if ((await hasTrackedChanges(taskRoot)) && !force) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
+      id: 'drop_dirty_worktree',
+      message: 'Cannot drop a task worktree with tracked changes without --force semantics.',
+      details: {
+        changedFiles: await listTrackedChanges(taskRoot),
+      },
+    });
+  }
+
+  if (force) {
+    return;
+  }
+
+  const unexpectedUntracked = await collectUnexpectedUntracked(taskRoot, item);
+  if (unexpectedUntracked.length > 0) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
+      id: 'drop_unexpected_untracked',
+      message: 'Cannot drop a task worktree with unexpected untracked files without --force semantics.',
+      details: {
+        unexpectedUntracked,
+      },
+    });
+  }
+}
+
+export async function dropTaskWorktree(taskRoot, options = {}) {
+  const marker = await loadMarker(taskRoot);
+  if (!marker || marker.kind !== 'task') {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'not_a_task_worktree',
+      message: 'dropTaskWorktree must run against a managed task worktree.',
+    });
+  }
+
+  const seedRoot = marker.repoRoot;
+  const state = await readWorktreeState(seedRoot);
+  const item = state.items.find((entry) => entry.worktreeId === marker.worktreeId) ?? null;
+  const branch = item?.branch ?? marker.branch;
+  const shouldDeleteBranch = options.deleteBranch === true;
+
+  await assertTaskDropSafe(taskRoot, item, options.force === true);
+
+  if (await pathExists(taskRoot)) {
+    const removeResult = await removeWorktree(seedRoot, taskRoot, true);
+    if (removeResult.code !== 0) {
+      throw new MwtError({
+        code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
+        id: 'drop_remove_failed',
+        message: `Failed to remove task worktree: ${removeResult.stderr || removeResult.stdout}`.trim(),
+      });
+    }
+
+    await removePath(taskRoot);
+  }
+
+  let branchDeleted = false;
+  if (shouldDeleteBranch && branch) {
+    await deleteBranch(seedRoot, branch, options.forceBranchDelete !== false);
+    branchDeleted = true;
+  }
+
+  await removeWorktreeStateEntry(seedRoot, marker.worktreeId);
+
+  return {
+    worktreeId: marker.worktreeId,
+    worktreeName: marker.worktreeName,
+    taskPath: marker.worktreePath,
+    branch,
+    branchDeleted,
+  };
+}
+
 export async function planPruneWorktrees(seedRoot, options = {}) {
   const state = await readWorktreeState(seedRoot);
   const eligible = [];
@@ -1336,32 +1470,7 @@ export async function pruneWorktrees(seedRoot, options = {}) {
     }
 
     if (await pathExists(item.path)) {
-      if ((await hasTrackedChanges(item.path)) && !options.force) {
-        throw new MwtError({
-          code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
-          id: 'prune_dirty_worktree',
-          message: `Cannot prune dirty task worktree without --force: ${item.name}`,
-        });
-      }
-
-      if (!options.force) {
-        const untracked = await listUntrackedChanges(item.path);
-        const allowedUntracked = new Set([
-          MWT_MARKER_FILE,
-          ...(item.bootstrapFiles ?? []),
-        ]);
-        const unexpectedUntracked = untracked.filter((entry) => !allowedUntracked.has(entry));
-        if (unexpectedUntracked.length > 0) {
-          throw new MwtError({
-            code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
-            id: 'prune_unexpected_untracked',
-            message: `Cannot prune task worktree with unexpected untracked files without --force: ${item.name}`,
-            details: {
-              unexpectedUntracked,
-            },
-          });
-        }
-      }
+      await assertTaskDropSafe(item.path, item, options.force);
     }
 
     const canDeleteBranch = options.withBranches
