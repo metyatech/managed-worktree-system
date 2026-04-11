@@ -13,6 +13,7 @@
 
 - Windows PowerShell is the currently verified operator environment
 - Git and Node.js 22 or later are required
+- npm 11.12.1 or later is recommended for authenticated scoped-package install and `npx` flows
 - the command surface is intended to remain cross-platform where Git behavior permits
 
 ## Install

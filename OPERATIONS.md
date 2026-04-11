@@ -35,6 +35,44 @@ Not allowed in the seed worktree:
 - long-lived conflict state
 - mutable runtime artifacts shared across tasks, such as `node_modules/`, `.venv/`, local databases, or build outputs
 
+## Recommended workspace topology
+
+Use one parent directory per project family or repository cluster. Inside that parent:
+
+- place each seed worktree at a normal repository path
+- let `mwt` keep the canonical bare Git store at `.bare/` inside that seed worktree
+- let `mwt create` place task worktrees as siblings of the seed worktree
+
+Example:
+
+```text
+workspace/
+  course-stack/
+    workspace-agent-hub/                 # seed worktree; humans inspect here
+      .bare/                             # canonical Git store; do not edit directly
+      .mwt/
+      .mwt-worktree.json
+      .env.local
+      ...
+    workspace-agent-hub-wt-fix-queue-a1b2c3d4/
+    workspace-agent-hub-wt-docs-b7c8d9e0/
+    course-docs-site/                    # sibling repo kept for relative topology
+```
+
+This layout is recommended because:
+
+- humans can keep using a normal visible repository path
+- `../other-repo` style relative paths keep the same meaning in task worktrees
+- cleanup is easy because task worktrees are visibly grouped next to the seed worktree
+- the bare Git store stays local to the repository instead of becoming a hidden global dependency
+
+Avoid these layouts:
+
+- placing the seed worktree directly under a crowded global root where unrelated task worktrees from many projects mix together
+- placing task worktrees under a nested child of the seed worktree, which breaks sibling-relative topology
+- editing inside `.bare/`
+- treating the seed worktree as a general coding workspace
+
 ## Standard operator flow
 
 1. Start from a clean seed worktree on the intended base branch.
