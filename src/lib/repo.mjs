@@ -938,6 +938,7 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     });
   }
 
+  await ensureLocalExcludeEntries(worktreePath);
   const marker = await writeTaskMarker(worktreePath, {
     repoId: path.basename(seedRoot),
     repoRoot: seedRoot,

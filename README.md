@@ -14,6 +14,7 @@
 - The seed is a normal non-bare repository checkout at the visible project root.
 - The seed stays tracked-clean and acts as the bootstrap source for ignored local files such as `.env.local`.
 - Every tracked edit happens in sibling task worktrees created by `mwt create`.
+- `.mwt-worktree.json` is a local runtime marker, not a file for version control.
 - `mwt deliver` is the explicit integration step from a task worktree back to the target branch.
 
 ## Migrating from 1.x

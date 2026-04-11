@@ -37,8 +37,12 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
 
   const excludePath = path.join(fixture.repoDir, '.git', 'info', 'exclude');
   const excludeContent = await readFile(excludePath, 'utf8');
+  assert.match(excludeContent, /\.mwt-worktree\.json/u);
   assert.match(excludeContent, /\.mwt\/state\//u);
   assert.match(excludeContent, /\.mwt\/logs\//u);
+
+  const seedStatus = await runGit(fixture.repoDir, ['status', '--short']);
+  assert.doesNotMatch(seedStatus.stdout, /\.mwt-worktree\.json/u);
 
   const doctorResult = await runCli(fixture.repoDir, ['doctor', '--deep', '--json']);
   const doctorJson = JSON.parse(doctorResult.stdout);
@@ -77,6 +81,9 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
 
   const envContent = await readFile(path.join(taskPath, '.env.local'), 'utf8');
   assert.equal(envContent, 'TOKEN=seed\n');
+
+  const taskStatus = await runGit(taskPath, ['status', '--short']);
+  assert.doesNotMatch(taskStatus.stdout, /\.mwt-worktree\.json/u);
 
   const listResult = await runCli(fixture.repoDir, ['list', '--json']);
   const listJson = JSON.parse(listResult.stdout);
