@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-- No unreleased changes.
+## 2.2.5 - 2026-04-15
+
+- Make `mwt drop` finish safe follow-on cleanup steps even when a later branch
+  deletion fails, so internal cleanup errors no longer leave a removed task
+  worktree registered in `.mwt/state/worktrees.json`.
+- Make `mwt prune` continue pruning later eligible worktrees after one target
+  hits a late cleanup failure, then report the incomplete cleanup with
+  aggregated details instead of stopping at the first partial result.
+- Fix merged-branch detection for branches shown as `+ branch` because they are
+  checked out in another linked worktree, so branch cleanup decisions stay
+  correct in multi-worktree cleanup flows.
 
 ## 2.2.4 - 2026-04-14
 

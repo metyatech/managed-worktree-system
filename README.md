@@ -254,6 +254,11 @@ mwt sync --base main
 
 Remove an active managed task worktree that you no longer need.
 
+If branch deletion or another later cleanup step fails after the worktree
+itself has already been detached, `mwt drop` still removes the task worktree
+and registry entry before returning an error so the repository does not keep a
+half-dropped managed task.
+
 Parameters:
 
 - `<name>`: task worktree name or worktree id. If omitted, the current task worktree is used.
@@ -270,6 +275,10 @@ mwt drop feature-auth --delete-branch --force-branch-delete --json
 #### `mwt prune`
 
 Remove managed task worktrees that are safe to delete.
+
+When one prune target hits a later cleanup failure, `mwt prune` still finishes
+the safe cleanup steps for that target and continues pruning the remaining
+eligible worktrees before reporting the incomplete cleanup.
 
 Parameters:
 

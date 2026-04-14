@@ -37,6 +37,7 @@ import {
 } from './fs.mjs';
 import {
   addWorktree,
+  branchExists,
   deleteBranch,
   fastForwardBranch,
   fetchBranch,
@@ -954,6 +955,172 @@ async function rollbackPartialTaskWorktree(
   }
 }
 
+function formatCleanupFailureMessage(value, fallback) {
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  if (
+    value &&
+    typeof value === 'object' &&
+    'stderr' in value &&
+    'stdout' in value
+  ) {
+    const stderr = typeof value.stderr === 'string' ? value.stderr.trim() : '';
+    const stdout = typeof value.stdout === 'string' ? value.stdout.trim() : '';
+    const code = typeof value.code === 'number' ? value.code : null;
+    return stderr || stdout || `${fallback}${code === null ? '' : ` (code ${code})`}`;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  return fallback;
+}
+
+function pushCleanupFailure(failures, step, error, extra = {}) {
+  failures.push({
+    step,
+    message: formatCleanupFailureMessage(error, `Cleanup step failed: ${step}`),
+    ...extra,
+  });
+}
+
+async function isLiveGitWorktree(seedRoot, worktreePath) {
+  const listed = await worktreeList(seedRoot);
+  return listed
+    .filter((entry) => !entry.bare)
+    .some((entry) => path.resolve(entry.path) === path.resolve(worktreePath));
+}
+
+async function finalizeTaskCleanup(seedRoot, input) {
+  const failures = [];
+  const completedSteps = [];
+  const worktreePath = input.taskRoot;
+  const liveBefore = await isLiveGitWorktree(seedRoot, worktreePath);
+  const pathBefore = await pathExists(worktreePath);
+
+  if (liveBefore || pathBefore) {
+    const removeResult = await removeWorktree(seedRoot, worktreePath, true);
+    if (removeResult.code !== 0) {
+      pushCleanupFailure(
+        failures,
+        'remove_worktree',
+        removeResult,
+        { path: toPortablePath(worktreePath) },
+      );
+    }
+  }
+
+  const liveAfter = await isLiveGitWorktree(seedRoot, worktreePath);
+  const worktreeRemoved = !liveAfter;
+
+  if (worktreeRemoved && (liveBefore || pathBefore)) {
+    completedSteps.push('remove_worktree');
+  }
+
+  let taskPathRemoved = false;
+  const pathStillExists = await pathExists(worktreePath);
+  if (worktreeRemoved && pathStillExists) {
+    try {
+      await removePath(worktreePath);
+    } catch (error) {
+      pushCleanupFailure(
+        failures,
+        'remove_path',
+        error,
+        { path: toPortablePath(worktreePath) },
+      );
+    }
+  }
+
+  taskPathRemoved = !(await pathExists(worktreePath));
+  if (taskPathRemoved && pathBefore) {
+    completedSteps.push('remove_path');
+  }
+
+  let branchDeleted = false;
+  if (input.deleteBranch && input.branch && worktreeRemoved) {
+    const deleteResult = await deleteBranch(
+      seedRoot,
+      input.branch,
+      input.forceBranchDelete !== false,
+    );
+    branchDeleted =
+      deleteResult.code === 0 || !(await branchExists(seedRoot, input.branch));
+    if (branchDeleted) {
+      completedSteps.push('delete_branch');
+    } else {
+      pushCleanupFailure(
+        failures,
+        'delete_branch',
+        deleteResult,
+        { branch: input.branch },
+      );
+    }
+  }
+
+  let stateRemoved = false;
+  if (worktreeRemoved) {
+    try {
+      await removeWorktreeStateEntry(seedRoot, input.worktreeId);
+      stateRemoved = true;
+      completedSteps.push('remove_state_entry');
+    } catch (error) {
+      pushCleanupFailure(
+        failures,
+        'remove_state_entry',
+        error,
+        { worktreeId: input.worktreeId },
+      );
+    }
+  }
+
+  return {
+    worktreeRemoved,
+    taskPathRemoved,
+    branchDeleted,
+    stateRemoved,
+    completedSteps,
+    failures,
+  };
+}
+
+function throwCleanupIncomplete({
+  id,
+  message,
+  worktreeId,
+  taskName,
+  taskPath,
+  branch,
+  worktreeRemoved,
+  taskPathRemoved,
+  branchDeleted,
+  stateRemoved,
+  completedSteps,
+  failures,
+}) {
+  throw new MwtError({
+    code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
+    id,
+    message,
+    details: {
+      worktreeId,
+      taskName,
+      taskPath: toPortablePath(taskPath),
+      branch,
+      worktreeRemoved,
+      taskPathRemoved,
+      branchDeleted,
+      stateRemoved,
+      completedSteps,
+      failures,
+      recovery: 'Resolve the blocking cleanup failure, then rerun the command or mwt doctor --deep --fix.',
+    },
+  });
+}
+
 async function ensureTaskWorktreeSubmodules(seedRoot, worktreePath) {
   if (!(await pathExists(path.join(seedRoot, '.gitmodules')))) {
     return;
@@ -1437,34 +1604,37 @@ export async function dropTaskWorktree(taskRoot, options = {}) {
   const shouldDeleteBranch = options.deleteBranch === true;
 
   await assertTaskDropSafe(taskRoot, item, options.force === true);
-
-  if (await pathExists(taskRoot)) {
-    const removeResult = await removeWorktree(seedRoot, taskRoot, true);
-    if (removeResult.code !== 0) {
-      throw new MwtError({
-        code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
-        id: 'drop_remove_failed',
-        message: `Failed to remove task worktree: ${removeResult.stderr || removeResult.stdout}`.trim(),
-      });
-    }
-
-    await removePath(taskRoot);
+  const cleanup = await finalizeTaskCleanup(seedRoot, {
+    taskRoot,
+    worktreeId: marker.worktreeId,
+    branch,
+    deleteBranch: shouldDeleteBranch,
+    forceBranchDelete: options.forceBranchDelete !== false,
+  });
+  if (cleanup.failures.length > 0) {
+    throwCleanupIncomplete({
+      id: 'drop_cleanup_incomplete',
+      message:
+        'Managed task cleanup could not finish every requested drop step.',
+      worktreeId: marker.worktreeId,
+      taskName: marker.worktreeName,
+      taskPath: marker.worktreePath,
+      branch,
+      worktreeRemoved: cleanup.worktreeRemoved,
+      taskPathRemoved: cleanup.taskPathRemoved,
+      branchDeleted: cleanup.branchDeleted,
+      stateRemoved: cleanup.stateRemoved,
+      completedSteps: cleanup.completedSteps,
+      failures: cleanup.failures,
+    });
   }
-
-  let branchDeleted = false;
-  if (shouldDeleteBranch && branch) {
-    await deleteBranch(seedRoot, branch, options.forceBranchDelete !== false);
-    branchDeleted = true;
-  }
-
-  await removeWorktreeStateEntry(seedRoot, marker.worktreeId);
 
   return {
     worktreeId: marker.worktreeId,
     worktreeName: marker.worktreeName,
     taskPath: marker.worktreePath,
     branch,
-    branchDeleted,
+    branchDeleted: cleanup.branchDeleted,
   };
 }
 
@@ -1576,6 +1746,7 @@ export async function planPruneWorktrees(seedRoot, options = {}) {
 export async function pruneWorktrees(seedRoot, options = {}) {
   const state = await readWorktreeState(seedRoot);
   const pruned = [];
+  const failures = [];
 
   for (const item of state.items) {
     const shouldPruneDelivered = options.merged && item.status === 'delivered';
@@ -1600,26 +1771,48 @@ export async function pruneWorktrees(seedRoot, options = {}) {
     const canDeleteBranch = options.withBranches
       ? await isBranchMerged(seedRoot, item.branch, marker.targetBranch)
       : false;
-
-    const removeResult = await removeWorktree(seedRoot, item.path, true);
-    if (removeResult.code !== 0) {
-      throw new MwtError({
-        code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
-        id: 'prune_remove_failed',
-        message: `Failed to remove task worktree: ${removeResult.stderr || removeResult.stdout}`.trim(),
+    const cleanup = await finalizeTaskCleanup(seedRoot, {
+      taskRoot: item.path,
+      worktreeId: item.worktreeId,
+      branch: item.branch,
+      deleteBranch: canDeleteBranch,
+      forceBranchDelete: options.force === true,
+    });
+    if (cleanup.stateRemoved) {
+      pruned.push({
+        worktreeId: item.worktreeId,
+        name: item.name,
+        branchDeleted: cleanup.branchDeleted,
       });
     }
-
-    await removePath(item.path);
-    if (canDeleteBranch) {
-      await deleteBranch(seedRoot, item.branch, options.force);
+    if (cleanup.failures.length > 0) {
+      failures.push({
+        worktreeId: item.worktreeId,
+        name: item.name,
+        taskPath: toPortablePath(item.path),
+        branch: item.branch,
+        worktreeRemoved: cleanup.worktreeRemoved,
+        taskPathRemoved: cleanup.taskPathRemoved,
+        branchDeleted: cleanup.branchDeleted,
+        stateRemoved: cleanup.stateRemoved,
+        completedSteps: cleanup.completedSteps,
+        failures: cleanup.failures,
+      });
     }
+  }
 
-    await removeWorktreeStateEntry(seedRoot, item.worktreeId);
-    pruned.push({
-      worktreeId: item.worktreeId,
-      name: item.name,
-      branchDeleted: canDeleteBranch,
+  if (failures.length > 0) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
+      id: 'prune_cleanup_incomplete',
+      message:
+        'Prune removed some managed task state but could not finish every cleanup step.',
+      details: {
+        pruned,
+        failures,
+        recovery:
+          'Resolve the blocking cleanup failure, then rerun mwt prune or mwt doctor --deep --fix.',
+      },
     });
   }
 

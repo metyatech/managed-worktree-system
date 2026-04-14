@@ -168,6 +168,15 @@ export async function deleteBranch(cwd, branch, force = false) {
   return git(['branch', force ? '-D' : '-d', branch], { cwd });
 }
 
+export async function branchExists(cwd, branch) {
+  const result = await git(['branch', '--list', branch], { cwd });
+  if (result.code !== 0) {
+    return false;
+  }
+
+  return result.stdout.trim().length > 0;
+}
+
 export async function isBranchMerged(cwd, branch, target) {
   const result = await git(['branch', '--merged', target], { cwd });
   if (result.code !== 0) {
@@ -176,7 +185,7 @@ export async function isBranchMerged(cwd, branch, target) {
 
   return result.stdout
     .split(/\r?\n/u)
-    .map((line) => line.replace(/^[* ]+/u, '').trim())
+    .map((line) => line.replace(/^[*+ ]+/u, '').trim())
     .includes(branch);
 }
 
