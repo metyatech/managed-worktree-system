@@ -4,6 +4,17 @@
 
 - No unreleased changes.
 
+## 2.2.1 - 2026-04-14
+
+- Fix `createTaskWorktree` so it rolls back the worktree link, the on-disk
+  directory, the task branch, and the state registry entry when any step
+  AFTER `git worktree add` fails (e.g. a failing `post_create` hook or a
+  bootstrap copy error). Previously these failures left behind a "phantom"
+  directory — often already bootstrapped with `node_modules` and
+  `package.json` — that blocked subsequent `createTaskWorktree` calls for
+  the same slug with `worktree_path_occupied` and produced zombie entries
+  in downstream orchestrators that crawl the seed parent.
+
 ## 2.2.0 - 2026-04-14
 
 - Add `mwt drop` so an active managed task worktree can be explicitly removed
