@@ -205,6 +205,58 @@ test('mwt drop removes an active task worktree and deletes its branch', async ()
   assert.equal(branchCheck.stdout.trim(), '');
 });
 
+test('createTaskWorktree rolls back the worktree, directory, branch, and state entry when a post-add step fails', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  // Inject a post_create hook guaranteed to fail. The hook runs AFTER
+  // `git worktree add` has already created the directory and the
+  // branch, which is exactly the window that used to leave phantom
+  // directories behind.
+  const configPath = path.join(fixture.repoDir, '.mwt', 'config.toml');
+  const originalConfig = await readFile(configPath, 'utf8');
+  const withFailingHook = `${originalConfig}
+
+[hooks.post_create]
+always_fails = "exit 1"
+`;
+  await writeFile(configPath, withFailingHook, 'utf8');
+
+  let caught;
+  try {
+    await createTaskWorktree(fixture.repoDir, 'post-create-failure', {
+      yes: true,
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught, 'createTaskWorktree should throw when post_create hook fails');
+  assert.equal(caught.id, 'hook_failed');
+
+  // The worktree path and branch must be gone: no phantom directories,
+  // no ghost branches, no stale state entries.
+  const listResult = await runGit(fixture.repoDir, ['worktree', 'list']);
+  assert.doesNotMatch(listResult.stdout, /post-create-failure/u);
+
+  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', '*post-create-failure*']);
+  assert.equal(branchCheck.stdout.trim(), '');
+
+  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
+
+  // The next createTaskWorktree with the same name must succeed
+  // (would fail with `worktree_path_occupied` if the directory was
+  // left behind).
+  await writeFile(configPath, originalConfig, 'utf8');
+  const retry = await createTaskWorktree(fixture.repoDir, 'post-create-failure', {
+    yes: true,
+  });
+  assert.equal(await pathExists(retry.worktreePath), true);
+});
+
 test('programmatic dropTaskWorktree removes an active manager task worktree and deletes its branch', async () => {
   const fixture = await createRepoWithRemote();
   await initializeRepository(fixture.repoDir, {

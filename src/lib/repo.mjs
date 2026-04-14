@@ -896,6 +896,63 @@ export async function planDeliverTaskWorktree(taskRoot, options = {}) {
   };
 }
 
+/**
+ * Best-effort rollback for `createTaskWorktree` when it crashes AFTER
+ * the underlying `git worktree add` succeeded. Leaving the worktree
+ * link, its filesystem directory (potentially bootstrapped with
+ * node_modules etc.), or the detached branch behind causes two nasty
+ * failure modes: subsequent `createTaskWorktree` calls hit
+ * `worktree_path_occupied`, and callers see ghost directories that
+ * look like zombie worktrees in `git worktree list`.
+ *
+ * Every step is wrapped so a single failure does not short-circuit
+ * the others: we always attempt worktree unlink, directory removal,
+ * and branch deletion in order.
+ */
+async function rollbackPartialTaskWorktree(
+  seedRoot,
+  worktreePath,
+  branch,
+  shortid,
+) {
+  const errors = [];
+  if (await pathExists(worktreePath).catch(() => false)) {
+    try {
+      await removeWorktree(seedRoot, worktreePath, true);
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      if (await pathExists(worktreePath).catch(() => false)) {
+        await removePath(worktreePath);
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (branch) {
+    try {
+      await deleteBranch(seedRoot, branch, true);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (shortid) {
+    try {
+      await removeWorktreeStateEntry(seedRoot, shortid);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) {
+    console.warn(
+      `[mwt] rollback after failed createTaskWorktree encountered ${errors.length} issue(s); the seed may still have partial state for ${toPortablePath(worktreePath)}: ${errors
+        .map((e) => (e instanceof Error ? e.message : String(e)))
+        .join('; ')}`,
+    );
+  }
+}
+
 export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   const config = await loadConfig(seedRoot);
   await assertSeedClean(seedRoot);
@@ -938,79 +995,87 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     });
   }
 
-  await ensureLocalExcludeEntries(worktreePath);
-  const marker = await writeTaskMarker(worktreePath, {
-    repoId: path.basename(seedRoot),
-    repoRoot: seedRoot,
-    worktreeName: taskName,
-    worktreeSlug: slug,
-    worktreeId: shortid,
-    branch,
-    baseBranch,
-    targetBranch,
-    createdAt: new Date().toISOString(),
-    createdBy: options.createdBy ?? 'human',
-  });
-
-  const hookContext = {
-    version: TOOL_STATE_VERSION,
-    repoRoot: toPortablePath(seedRoot),
-    seedPath: toPortablePath(seedRoot),
-    defaultBranch: config.default_branch,
-    defaultRemote: config.default_remote,
-    worktree: {
-      kind: 'task',
-      name: taskName,
-      slug,
-      id: shortid,
-      path: toPortablePath(worktreePath),
+  // `git worktree add` has succeeded: from here on any failure must
+  // roll the worktree back so we don't leave a half-created, half-
+  // bootstrapped directory that future calls can't overwrite.
+  try {
+    await ensureLocalExcludeEntries(worktreePath);
+    const marker = await writeTaskMarker(worktreePath, {
+      repoId: path.basename(seedRoot),
+      repoRoot: seedRoot,
+      worktreeName: taskName,
+      worktreeSlug: slug,
+      worktreeId: shortid,
       branch,
       baseBranch,
       targetBranch,
-    },
-  };
+      createdAt: new Date().toISOString(),
+      createdBy: options.createdBy ?? 'human',
+    });
 
-  await runHooks(seedRoot, 'pre_create', {
-    ...hookContext,
-    hookType: 'pre_create',
-  }, {
-    yes: options.yes,
-    worktreePath,
-  });
+    const hookContext = {
+      version: TOOL_STATE_VERSION,
+      repoRoot: toPortablePath(seedRoot),
+      seedPath: toPortablePath(seedRoot),
+      defaultBranch: config.default_branch,
+      defaultRemote: config.default_remote,
+      worktree: {
+        kind: 'task',
+        name: taskName,
+        slug,
+        id: shortid,
+        path: toPortablePath(worktreePath),
+        branch,
+        baseBranch,
+        targetBranch,
+      },
+    };
 
-  const bootstrapResult = bootstrapEnabled(config, options)
-    ? await copyBootstrapFiles(seedRoot, worktreePath, config, options.copyProfile)
-    : { profileKey: options.copyProfile ?? config.bootstrap?.default_profile ?? DEFAULT_BOOTSTRAP_PROFILE, copied: [] };
+    await runHooks(seedRoot, 'pre_create', {
+      ...hookContext,
+      hookType: 'pre_create',
+    }, {
+      yes: options.yes,
+      worktreePath,
+    });
 
-  await runHooks(seedRoot, 'post_create', {
-    ...hookContext,
-    hookType: 'post_create',
-  }, {
-    yes: options.yes,
-    worktreePath,
-  });
+    const bootstrapResult = bootstrapEnabled(config, options)
+      ? await copyBootstrapFiles(seedRoot, worktreePath, config, options.copyProfile)
+      : { profileKey: options.copyProfile ?? config.bootstrap?.default_profile ?? DEFAULT_BOOTSTRAP_PROFILE, copied: [] };
 
-  await upsertWorktreeState(seedRoot, {
-    worktreeId: shortid,
-    name: taskName,
-    branch,
-    path: toPortablePath(worktreePath),
-    status: 'active',
-    bootstrapFiles: bootstrapResult.copied,
-  });
+    await runHooks(seedRoot, 'post_create', {
+      ...hookContext,
+      hookType: 'post_create',
+    }, {
+      yes: options.yes,
+      worktreePath,
+    });
 
-  return {
-    worktreeName: taskName,
-    worktreeSlug: slug,
-    worktreeId: shortid,
-    worktreePath: toPortablePath(worktreePath),
-    branch,
-    baseBranch,
-    targetBranch,
-    bootstrapProfile: bootstrapResult.profileKey,
-    copiedFiles: bootstrapResult.copied,
-    marker,
-  };
+    await upsertWorktreeState(seedRoot, {
+      worktreeId: shortid,
+      name: taskName,
+      branch,
+      path: toPortablePath(worktreePath),
+      status: 'active',
+      bootstrapFiles: bootstrapResult.copied,
+    });
+
+    return {
+      worktreeName: taskName,
+      worktreeSlug: slug,
+      worktreeId: shortid,
+      worktreePath: toPortablePath(worktreePath),
+      branch,
+      baseBranch,
+      targetBranch,
+      bootstrapProfile: bootstrapResult.profileKey,
+      copiedFiles: bootstrapResult.copied,
+      marker,
+    };
+  } catch (error) {
+    await rollbackPartialTaskWorktree(seedRoot, worktreePath, branch, shortid);
+    throw error;
+  }
 }
 
 export async function listWorktrees(seedRoot, options = {}) {
