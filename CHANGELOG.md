@@ -4,6 +4,14 @@
 
 - No unreleased changes.
 
+## 2.2.3 - 2026-04-14
+
+- Initialize Git submodules inside newly created task worktrees before hooks run,
+  so repositories whose tooling or rules live in submodules do not fail on first
+  commit just because `mwt create` left the submodule checkout empty.
+- Add regression coverage for submodule-backed worktrees to keep this setup
+  contract from regressing.
+
 ## 2.2.2 - 2026-04-14
 
 - Fix the `createRepoWithRemote` integration test fixture so the

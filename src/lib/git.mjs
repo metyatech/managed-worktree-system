@@ -151,6 +151,10 @@ export async function addWorktree(cwd, worktreePath, branch, startPoint) {
   ], { cwd });
 }
 
+export async function updateSubmodules(cwd) {
+  return git(['submodule', 'update', '--init', '--recursive'], { cwd });
+}
+
 export async function removeWorktree(cwd, worktreePath, force = false) {
   const args = ['worktree', 'remove', worktreePath];
   if (force) {

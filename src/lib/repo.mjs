@@ -56,6 +56,7 @@ import {
   pushHeadToBranch,
   rebaseOnto,
   removeWorktree,
+  updateSubmodules,
   worktreeList,
 } from './git.mjs';
 import {
@@ -953,6 +954,24 @@ async function rollbackPartialTaskWorktree(
   }
 }
 
+async function ensureTaskWorktreeSubmodules(seedRoot, worktreePath) {
+  if (!(await pathExists(path.join(seedRoot, '.gitmodules')))) {
+    return;
+  }
+
+  const updateResult = await updateSubmodules(worktreePath);
+  if (updateResult.code !== 0) {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'submodule_update_failed',
+      message: `Failed to initialize submodules in the new task worktree: ${updateResult.stderr || updateResult.stdout}`.trim(),
+      details: {
+        worktreePath: toPortablePath(worktreePath),
+      },
+    });
+  }
+}
+
 export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   const config = await loadConfig(seedRoot);
   await assertSeedClean(seedRoot);
@@ -999,6 +1018,7 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   // roll the worktree back so we don't leave a half-created, half-
   // bootstrapped directory that future calls can't overwrite.
   try {
+    await ensureTaskWorktreeSubmodules(seedRoot, worktreePath);
     await ensureLocalExcludeEntries(worktreePath);
     const marker = await writeTaskMarker(worktreePath, {
       repoId: path.basename(seedRoot),

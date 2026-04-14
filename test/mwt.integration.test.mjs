@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -20,6 +20,20 @@ import {
   runGit,
   waitForPath,
 } from './helpers.mjs';
+
+async function createLocalSubmoduleRepo(rootDir, repoName = 'rules-submodule') {
+  const repoDir = path.join(rootDir, repoName);
+  await mkdir(path.join(repoDir, 'rules'), { recursive: true });
+  await runGit(repoDir, ['init', '-b', 'main']);
+  await writeFile(
+    path.join(repoDir, 'rules', 'course-site-metadata.md'),
+    '# Private Rules\n',
+    'utf8',
+  );
+  await runGit(repoDir, ['add', '.']);
+  await runGit(repoDir, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'init submodule']);
+  return repoDir;
+}
 
 test('mwt init keeps the seed as a normal non-bare repo and doctor passes', async () => {
   const fixture = await createRepoWithRemote();
@@ -108,6 +122,41 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
   const listJson = JSON.parse(listResult.stdout);
   assert.equal(listJson.result.items.some((item) => item.kind === 'seed'), true);
   assert.equal(listJson.result.items.some((item) => item.kind === 'task'), true);
+});
+
+test('mwt create initializes submodules in the new task worktree before hooks run', async () => {
+  const fixture = await createRepoWithRemote();
+  const submoduleRepo = await createLocalSubmoduleRepo(fixture.rootDir);
+  await runGit(fixture.repoDir, ['config', 'protocol.file.allow', 'always']);
+  await runGit(
+    fixture.repoDir,
+    ['-c', 'protocol.file.allow=always', 'submodule', 'add', submoduleRepo, 'agent-rules-private'],
+  );
+  await runGit(fixture.repoDir, ['add', '.gitmodules', 'agent-rules-private']);
+  await runGit(fixture.repoDir, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'add rules submodule']);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(
+    fixture.repoDir,
+    ['create', 'feature-submodule', '--json'],
+    0,
+    {
+      env: {
+        GIT_ALLOW_PROTOCOL: 'file',
+      },
+    },
+  );
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+
+  assert.equal(
+    await pathExists(path.join(taskPath, 'agent-rules-private', 'rules', 'course-site-metadata.md')),
+    true,
+  );
+
+  const submoduleStatus = await runGit(taskPath, ['submodule', 'status', '--recursive']);
+  assert.doesNotMatch(submoduleStatus.stdout, /^-/mu);
 });
 
 test('programmatic createTaskWorktree supports manager-specific path, branch, and createdBy overrides', async () => {

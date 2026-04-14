@@ -173,6 +173,9 @@ mwt init --base main --remote origin --json
 #### `mwt create <name>`
 
 Create a sibling task worktree and branch from the configured remote base.
+When the seed repository contains Git submodules, `mwt create` also runs
+`git submodule update --init --recursive` inside the new task worktree before
+project hooks execute, so hook/tooling paths backed by submodules are present.
 
 Parameters:
 
