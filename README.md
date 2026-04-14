@@ -124,7 +124,13 @@ Core flow:
    mwt deliver feature-auth --target main
    ```
 
-4. Prune delivered worktrees:
+4. If you no longer need an active task worktree, drop it explicitly:
+
+   ```powershell
+   mwt drop preview-auth --delete-branch --force-branch-delete
+   ```
+
+5. Prune delivered worktrees:
 
    ```powershell
    mwt prune --merged --with-branches
@@ -138,6 +144,7 @@ mwt create feature-auth
 mwt create preview-auth --dry-run --json
 mwt list --kind task --status active --json
 mwt deliver feature-auth --target main
+mwt drop preview-auth --delete-branch --force-branch-delete
 mwt sync --base main
 mwt prune --merged --with-branches
 mwt doctor --fix
@@ -238,6 +245,23 @@ Example:
 
 ```powershell
 mwt sync --base main
+```
+
+#### `mwt drop [<name>]`
+
+Remove an active managed task worktree that you no longer need.
+
+Parameters:
+
+- `<name>`: task worktree name or worktree id. If omitted, the current task worktree is used.
+- `--force`: allow removal when tracked changes or unexpected untracked files remain.
+- `--delete-branch`: delete the local task branch after removing the worktree.
+- `--force-branch-delete`: use force branch deletion semantics when removing the local branch.
+
+Example:
+
+```powershell
+mwt drop feature-auth --delete-branch --force-branch-delete --json
 ```
 
 #### `mwt prune`

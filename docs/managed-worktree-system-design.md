@@ -242,8 +242,10 @@ The system should stay narrow.
 - `mwt list`
 - `mwt deliver <name>`
 - `mwt sync`
+- `mwt drop [<name>]`
 - `mwt prune`
 - `mwt doctor`
+- `mwt version`
 
 Required CLI properties:
 
@@ -328,6 +330,21 @@ Important rule:
 
 - `mwt sync` must **fail explicitly** if the seed worktree has tracked changes
 - it must not silently skip and claim the repository is healthy
+
+### `mwt drop`
+
+Purpose:
+
+- remove an active managed task worktree that is no longer needed
+- optionally delete the corresponding local task branch
+
+Flow:
+
+1. Resolve the target task by explicit name or current task worktree context.
+2. Refuse deletion when the task worktree is dirty unless `--force` is given.
+3. Remove the Git worktree first, then the directory.
+4. Delete the local task branch only when explicitly requested.
+5. Remove the task from managed state.
 
 ### `mwt prune`
 

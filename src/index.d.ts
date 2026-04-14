@@ -138,6 +138,7 @@ export declare function doctorRepository(seedRoot: string, options?: Record<stri
 export declare function planInitializeRepository(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function planCreateTaskWorktree(seedRoot: string, taskName: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function planDeliverTaskWorktree(taskRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function planDropTaskWorktree(taskRoot: string, options?: DropTaskWorktreeOptions): Promise<Record<string, unknown>>;
 export declare function planPruneWorktrees(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function planDoctorRepository(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export declare function planSyncSeed(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;

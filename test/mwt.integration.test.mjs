@@ -69,6 +69,25 @@ test('mwt init rejects a bare repository', async () => {
   assert.equal(initJson.error.id, 'init_requires_non_bare_repo');
 });
 
+test('every CLI subcommand returns command-specific help with -h', async () => {
+  const fixture = await createRepoWithRemote();
+  const commands = ['init', 'create', 'list', 'deliver', 'sync', 'drop', 'prune', 'doctor', 'version'];
+
+  for (const command of commands) {
+    const helpResult = await runCli(fixture.repoDir, [command, '-h']);
+    assert.match(helpResult.stdout, new RegExp(`^Usage: mwt ${command}\\b`, 'u'));
+    assert.doesNotMatch(helpResult.stdout, /^Commands:/mu);
+  }
+});
+
+test('mwt version subcommand prints the package version', async () => {
+  const fixture = await createRepoWithRemote();
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+
+  const versionResult = await runCli(fixture.repoDir, ['version']);
+  assert.equal(versionResult.stdout, packageJson.version);
+});
+
 test('mwt create makes sibling task worktree and copies allowlisted ignored bootstrap files', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
@@ -165,6 +184,27 @@ test('mwt deliver pushes committed task changes and prune removes delivered work
   assert.equal(state.items.length, 0);
 });
 
+test('mwt drop removes an active task worktree and deletes its branch', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(fixture.repoDir, ['create', 'drop-it', '--json']);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+  const taskBranch = createJson.result.branch;
+
+  const dropResult = await runCli(fixture.repoDir, ['drop', 'drop-it', '--delete-branch', '--force-branch-delete', '--json']);
+  const dropJson = JSON.parse(dropResult.stdout);
+  assert.equal(dropJson.ok, true);
+  assert.equal(dropJson.result.branchDeleted, true);
+  assert.equal(await pathExists(taskPath), false);
+
+  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
+
+  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
+  assert.equal(branchCheck.stdout.trim(), '');
+});
+
 test('programmatic dropTaskWorktree removes an active manager task worktree and deletes its branch', async () => {
   const fixture = await createRepoWithRemote();
   await initializeRepository(fixture.repoDir, {
@@ -246,6 +286,27 @@ test('mwt create --dry-run returns a creation plan without mutating the reposito
 
   const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
   assert.equal(state.items.length, 0);
+});
+
+test('mwt drop --dry-run plans removal without mutating the repository', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(fixture.repoDir, ['create', 'preview-drop', '--json']);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+
+  const dryRunResult = await runCli(
+    fixture.repoDir,
+    ['drop', 'preview-drop', '--delete-branch', '--dry-run', '--json'],
+  );
+  const dryRunJson = JSON.parse(dryRunResult.stdout);
+  assert.equal(dryRunJson.result.dryRun, true);
+  assert.equal(dryRunJson.result.actions.some((action) => action.id === 'drop_worktree'), true);
+  assert.equal(dryRunJson.result.actions.some((action) => action.id === 'drop_branch'), true);
+  assert.equal(await pathExists(taskPath), true);
+
+  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 1);
 });
 
 test('mwt create --run-bootstrap overrides a disabled bootstrap config', async () => {

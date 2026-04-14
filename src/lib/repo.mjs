@@ -1383,6 +1383,44 @@ export async function dropTaskWorktree(taskRoot, options = {}) {
   };
 }
 
+export async function planDropTaskWorktree(taskRoot, options = {}) {
+  const marker = await loadMarker(taskRoot);
+  if (!marker || marker.kind !== 'task') {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'not_a_task_worktree',
+      message: 'dropTaskWorktree must run against a managed task worktree.',
+    });
+  }
+
+  const seedRoot = marker.repoRoot;
+  const state = await readWorktreeState(seedRoot);
+  const item = state.items.find((entry) => entry.worktreeId === marker.worktreeId) ?? null;
+  const branch = item?.branch ?? marker.branch;
+  const shouldDeleteBranch = options.deleteBranch === true;
+
+  await assertTaskDropSafe(taskRoot, item, options.force === true);
+
+  return {
+    dryRun: true,
+    worktreeId: marker.worktreeId,
+    worktreeName: marker.worktreeName,
+    taskPath: marker.worktreePath,
+    branch,
+    branchDeleted: shouldDeleteBranch && Boolean(branch),
+    actions: [
+      {
+        id: 'drop_worktree',
+        description: `Remove ${marker.worktreeName} at ${marker.worktreePath}.`,
+      },
+      ...(shouldDeleteBranch && branch ? [{
+        id: 'drop_branch',
+        description: `Delete local branch ${branch}.`,
+      }] : []),
+    ],
+  };
+}
+
 export async function planPruneWorktrees(seedRoot, options = {}) {
   const state = await readWorktreeState(seedRoot);
   const eligible = [];

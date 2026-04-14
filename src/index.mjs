@@ -14,6 +14,7 @@ export {
   planCreateTaskWorktree,
   planDeliverTaskWorktree,
   planDoctorRepository,
+  planDropTaskWorktree,
   planInitializeRepository,
   planPruneWorktrees,
   planSyncSeed,

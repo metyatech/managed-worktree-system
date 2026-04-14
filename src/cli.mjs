@@ -21,10 +21,12 @@ import {
   planCreateTaskWorktree,
   planDeliverTaskWorktree,
   planDoctorRepository,
+  planDropTaskWorktree,
   planInitializeRepository,
   planPruneWorktrees,
   planSyncSeed,
   pruneWorktrees,
+  dropTaskWorktree,
   syncSeed,
 } from './lib/repo.mjs';
 import { getRepoRoot, isBareRepository } from './lib/git.mjs';
@@ -42,6 +44,7 @@ Commands:
   list       List Git worktrees and managed metadata
   deliver    Deliver a managed task worktree to its target branch
   sync       Fast-forward the seed worktree from its configured remote branch
+  drop       Remove a managed task worktree that is no longer needed
   prune      Remove managed task worktrees that are safe to prune
   doctor     Validate and optionally repair managed-worktree metadata
   version    Print the current CLI version
@@ -63,11 +66,17 @@ Example: mwt deliver feature-auth --target main --json
   sync: `Usage: mwt sync [--base <branch>] [--json]
 Example: mwt sync --base main --json
 `,
+  drop: `Usage: mwt drop [<name>] [--force] [--delete-branch] [--force-branch-delete] [--json]
+Example: mwt drop feature-auth --delete-branch --force-branch-delete --json
+`,
   prune: `Usage: mwt prune [--merged] [--abandoned] [--force] [--with-branches] [--json]
 Example: mwt prune --merged --with-branches --json
 `,
   doctor: `Usage: mwt doctor [--fix] [--deep] [--json]
 Example: mwt doctor --fix --json
+`,
+  version: `Usage: mwt version
+Example: mwt version
 `,
 };
 
@@ -104,7 +113,37 @@ function detectOutputOptions(args) {
 }
 
 function resolveInvocation(args) {
-  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+  if (args.length === 0) {
+    return {
+      mode: 'help',
+      outputOptions: detectOutputOptions(args),
+    };
+  }
+
+  const commandIndex = args.findIndex((argument) => SUPPORTED_COMMANDS.includes(argument));
+  if (commandIndex !== -1) {
+    const command = args[commandIndex];
+    const commandArgs = [
+      ...args.slice(0, commandIndex),
+      ...args.slice(commandIndex + 1),
+    ];
+
+    if (command === 'version' && !commandArgs.includes('--help') && !commandArgs.includes('-h')) {
+      return {
+        mode: 'version',
+        outputOptions: detectOutputOptions(commandArgs),
+      };
+    }
+
+    return {
+      mode: 'command',
+      command,
+      commandArgs,
+      outputOptions: detectOutputOptions(commandArgs),
+    };
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
     return {
       mode: 'help',
       outputOptions: detectOutputOptions(args),
@@ -118,30 +157,14 @@ function resolveInvocation(args) {
     };
   }
 
-  const commandIndex = args.findIndex((argument) => SUPPORTED_COMMANDS.includes(argument));
-  if (commandIndex === -1) {
-    throw new MwtError({
-      code: EXIT_CODES.INVALID_USAGE,
-      id: 'unknown_command',
-      message: `Unknown command: ${args[0]}`,
-      details: {
-        supportedCommands: SUPPORTED_COMMANDS,
-      },
-    });
-  }
-
-  const command = args[commandIndex];
-  const commandArgs = [
-    ...args.slice(0, commandIndex),
-    ...args.slice(commandIndex + 1),
-  ];
-
-  return {
-    mode: 'command',
-    command,
-    commandArgs,
-    outputOptions: detectOutputOptions(commandArgs),
-  };
+  throw new MwtError({
+    code: EXIT_CODES.INVALID_USAGE,
+    id: 'unknown_command',
+    message: `Unknown command: ${args[0]}`,
+    details: {
+      supportedCommands: SUPPORTED_COMMANDS,
+    },
+  });
 }
 
 function parseCommandOptions(command, args) {
@@ -186,6 +209,12 @@ function parseCommandOptions(command, args) {
       ...shared,
       base: { type: 'string' },
     },
+    drop: {
+      ...shared,
+      force: { type: 'boolean' },
+      'delete-branch': { type: 'boolean' },
+      'force-branch-delete': { type: 'boolean' },
+    },
     prune: {
       ...shared,
       merged: { type: 'boolean' },
@@ -205,6 +234,23 @@ function parseCommandOptions(command, args) {
     allowPositionals: true,
     strict: true,
     options: optionsByCommand[command] ?? shared,
+  });
+}
+
+async function resolveDropTaskRoot(context, positionals) {
+  if (positionals[0]) {
+    const task = await findTaskByName(context.seedRoot, positionals[0]);
+    return task.path;
+  }
+
+  if (context.marker?.kind === 'task') {
+    return context.worktreeRoot;
+  }
+
+  throw new MwtError({
+    code: EXIT_CODES.INVALID_USAGE,
+    id: 'missing_drop_target',
+    message: 'mwt drop requires a task worktree name when run from the seed checkout.',
   });
 }
 
@@ -376,6 +422,20 @@ async function runCommand(command, parsed) {
             summary: values.fix ? 'Planned doctor repair actions.' : 'Planned doctor inspection.',
           },
         };
+      case 'drop': {
+        const taskRoot = await resolveDropTaskRoot(context, positionals);
+        return {
+          repoRoot: context.seedRoot,
+          result: {
+            ...(await planDropTaskWorktree(taskRoot, {
+              force: values.force,
+              deleteBranch: values['delete-branch'],
+              forceBranchDelete: values['force-branch-delete'],
+            })),
+            summary: 'Planned task worktree removal.',
+          },
+        };
+      }
       case 'list':
         return {
           repoRoot: context.worktreeRoot,
@@ -483,6 +543,23 @@ async function runCommand(command, parsed) {
         result: {
           ...result,
           summary: `Delivered task worktree ${result.worktreeId} to ${result.targetBranch}.`,
+        },
+      };
+    }
+    case 'drop': {
+      const taskRoot = await resolveDropTaskRoot(context, positionals);
+      const result = await runWithRepoLock(() => dropTaskWorktree(taskRoot, {
+        force: values.force,
+        deleteBranch: values['delete-branch'],
+        forceBranchDelete: values['force-branch-delete'],
+      }));
+      return {
+        repoRoot: context.seedRoot,
+        result: {
+          ...result,
+          summary: result.branchDeleted
+            ? `Dropped task worktree ${result.worktreeName} and deleted ${result.branch}.`
+            : `Dropped task worktree ${result.worktreeName}.`,
         },
       };
     }

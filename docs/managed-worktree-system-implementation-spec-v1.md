@@ -103,6 +103,7 @@ The executable name is `mwt`.
 - `mwt list`
 - `mwt deliver [<name>]`
 - `mwt sync`
+- `mwt drop [<name>]`
 - `mwt prune`
 - `mwt doctor`
 - `mwt version`
@@ -158,6 +159,14 @@ If `<name>` is omitted, `deliver` operates on the current worktree.
 #### `mwt sync`
 
 - `--base <branch>`
+
+#### `mwt drop`
+
+- `--force`
+- `--delete-branch`
+- `--force-branch-delete`
+
+If `<name>` is omitted, `drop` operates on the current task worktree.
 
 #### `mwt prune`
 

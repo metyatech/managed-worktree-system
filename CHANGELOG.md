@@ -4,6 +4,15 @@
 
 - No unreleased changes.
 
+## 2.2.0 - 2026-04-14
+
+- Add `mwt drop` so an active managed task worktree can be explicitly removed
+  from the CLI, with optional local branch deletion and dry-run support.
+- Fix subcommand-specific help so `mwt <command> -h` shows that command's help
+  instead of always falling back to top-level help.
+- Fix the documented `mwt version` subcommand and add CLI contract tests that
+  cover per-subcommand help, version, and create-to-drop task lifecycle flows.
+
 ## 2.1.1 - 2026-04-11
 
 - Keep `.mwt-worktree.json` local runtime markers out of normal Git status by

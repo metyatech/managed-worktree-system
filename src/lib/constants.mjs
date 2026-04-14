@@ -48,6 +48,7 @@ export const SUPPORTED_COMMANDS = [
   'list',
   'deliver',
   'sync',
+  'drop',
   'prune',
   'doctor',
   'version',
