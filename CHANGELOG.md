@@ -4,6 +4,18 @@
 
 - No unreleased changes.
 
+## 2.2.4 - 2026-04-14
+
+- Remove empty stale worktree directories during `mwt doctor --fix` so
+  interrupted cleanup no longer leaves empty `repo-wt-*` siblings behind after
+  the stale registry entry is repaired.
+- Delete stale local task branches during `mwt doctor --fix` only when the
+  branch no longer has unique commits, so no-op residue does not keep cluttering
+  the seed after an interrupted cleanup.
+- Remove empty orphan sibling directories during `mwt doctor --deep --fix`
+  so doctor can self-heal fully orphaned managed-looking folders instead of
+  only reporting them.
+
 ## 2.2.3 - 2026-04-14
 
 - Initialize Git submodules inside newly created task worktrees before hooks run,

@@ -352,6 +352,63 @@ test('mwt doctor --fix rebuilds a missing worktree registry entry', async () => 
   assert.equal(doctorJson.result.actions.some((action) => action.worktreeId === marker.worktreeId), true);
 });
 
+test('mwt doctor --fix removes an empty stale worktree directory and deletes a stale branch with no unique commits', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(fixture.repoDir, ['create', 'stale-empty', '--json']);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+  const taskBranch = createJson.result.branch;
+
+  await runGit(fixture.repoDir, ['worktree', 'remove', taskPath, '--force']);
+  await mkdir(taskPath, { recursive: true });
+
+  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const doctorJson = JSON.parse(doctorResult.stdout);
+  assert.equal(
+    doctorJson.result.actions.some((action) => action.id === 'remove_empty_stale_worktree_dir'),
+    true,
+  );
+  assert.equal(
+    doctorJson.result.actions.some((action) => action.id === 'delete_stale_branch' && action.branch === taskBranch),
+    true,
+  );
+  assert.equal(await pathExists(taskPath), false);
+
+  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
+
+  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
+  assert.equal(branchCheck.stdout.trim(), '');
+});
+
+test('mwt doctor --fix keeps a stale branch when it still has unique commits', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(fixture.repoDir, ['create', 'stale-unique', '--json']);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+  const taskBranch = createJson.result.branch;
+
+  await writeFile(path.join(taskPath, 'README.md'), '# Unique stale branch\n', 'utf8');
+  await runGit(taskPath, ['add', 'README.md']);
+  await runGit(taskPath, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'unique branch change']);
+
+  await runGit(fixture.repoDir, ['worktree', 'remove', taskPath, '--force']);
+  await mkdir(taskPath, { recursive: true });
+
+  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const doctorJson = JSON.parse(doctorResult.stdout);
+  assert.equal(
+    doctorJson.result.actions.some((action) => action.id === 'delete_stale_branch' && action.branch === taskBranch),
+    false,
+  );
+  assert.equal(await pathExists(taskPath), false);
+
+  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
+  assert.match(branchCheck.stdout, new RegExp(taskBranch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+});
+
 test('mwt doctor --deep --fix clears expired lock files', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
@@ -373,6 +430,22 @@ test('mwt doctor --deep --fix clears expired lock files', async () => {
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(doctorJson.result.actions.some((action) => action.id === 'clear_expired_lock'), true);
   assert.equal(await pathExists(lockPath), false);
+});
+
+test('mwt doctor --deep --fix removes empty orphan sibling directories matching the managed prefix', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+
+  const orphanDir = path.join(fixture.rootDir, 'repo-wt-orphan-empty-deadbeef');
+  await mkdir(orphanDir, { recursive: true });
+
+  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--deep', '--fix', '--json']);
+  const doctorJson = JSON.parse(doctorResult.stdout);
+  assert.equal(
+    doctorJson.result.actions.some((action) => action.id === 'remove_orphan_sibling_dir'),
+    true,
+  );
+  assert.equal(await pathExists(orphanDir), false);
 });
 
 test('mwt create --dry-run returns a creation plan without mutating the repository', async () => {

@@ -290,8 +290,13 @@ Validate managed metadata and optionally repair registry drift.
 
 Parameters:
 
-- `--fix`: repair missing or stale registry entries when possible.
+- `--fix`: repair missing or stale registry entries when possible, remove empty
+  stale worktree directories, and delete stale local task branches that no
+  longer contain unique commits.
 - `--deep`: include lock files, orphan sibling directories, and seed topology checks.
+
+With `--deep --fix`, `mwt doctor` also removes empty orphan sibling directories
+that match the managed naming pattern but are no longer live worktrees.
 
 Example:
 

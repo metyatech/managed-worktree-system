@@ -1641,6 +1641,28 @@ async function listSiblingTaskDirectories(seedRoot) {
     .map((entry) => path.join(parentDir, entry.name));
 }
 
+async function isEmptyDirectory(targetPath) {
+  if (!(await pathExists(targetPath))) {
+    return false;
+  }
+
+  try {
+    const entries = await readdir(targetPath, { withFileTypes: true });
+    return entries.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function removeEmptyDirectoryIfPresent(targetPath) {
+  if (!(await isEmptyDirectory(targetPath))) {
+    return false;
+  }
+
+  await removePath(targetPath);
+  return !(await pathExists(targetPath));
+}
+
 async function assessDoctorRepository(seedRoot, options = {}) {
   const managedPaths = getManagedPaths(seedRoot);
   if (!(await pathExists(managedPaths.configPath)) || !(await pathExists(managedPaths.markerPath))) {
@@ -1657,6 +1679,7 @@ async function assessDoctorRepository(seedRoot, options = {}) {
   const listed = (await worktreeList(seedRoot)).filter((entry) => !entry.bare);
   const listedPaths = new Set(listed.map((entry) => path.resolve(entry.path)));
   const nextItems = [];
+  const config = options.fix ? await loadConfig(seedRoot) : null;
 
   for (const item of state.items) {
     if (!listedPaths.has(path.resolve(item.path))) {
@@ -1664,10 +1687,32 @@ async function assessDoctorRepository(seedRoot, options = {}) {
         id: 'stale_registry_entry',
         severity: 'warning',
         message: `Registry contains stale worktree entry: ${item.name}`,
-        details: { path: item.path },
+        details: { path: item.path, branch: item.branch },
       });
 
       if (options.fix) {
+        if (await removeEmptyDirectoryIfPresent(item.path)) {
+          actions.push({
+            id: 'remove_empty_stale_worktree_dir',
+            path: toPortablePath(item.path),
+          });
+        }
+        if (config && item.branch) {
+          const divergence = await getAheadBehind(
+            seedRoot,
+            item.branch,
+            config.default_branch,
+          );
+          if (divergence && divergence.ahead === 0) {
+            const deleteResult = await deleteBranch(seedRoot, item.branch, true);
+            if (deleteResult.code === 0) {
+              actions.push({
+                id: 'delete_stale_branch',
+                branch: item.branch,
+              });
+            }
+          }
+        }
         actions.push({
           id: 'remove_stale_registry_entry',
           worktreeId: item.worktreeId,
@@ -1748,6 +1793,13 @@ async function assessDoctorRepository(seedRoot, options = {}) {
           path: toPortablePath(siblingDir),
         },
       });
+
+      if (options.fix && await removeEmptyDirectoryIfPresent(siblingDir)) {
+        actions.push({
+          id: 'remove_orphan_sibling_dir',
+          path: toPortablePath(siblingDir),
+        });
+      }
     }
   }
 
@@ -1792,6 +1844,7 @@ export async function planDoctorRepository(seedRoot, options = {}) {
     fix: false,
   });
   const plannedFixes = [];
+  const config = options.fix ? await loadConfig(seedRoot) : null;
 
   if (options.fix) {
     for (const issue of assessment.issues) {
@@ -1800,11 +1853,47 @@ export async function planDoctorRepository(seedRoot, options = {}) {
           id: 'remove_stale_registry_entry',
           description: issue.message,
         });
+        const issuePath = issue.details?.path;
+        if (typeof issuePath === 'string' && await isEmptyDirectory(issuePath)) {
+          plannedFixes.push({
+            id: 'remove_empty_stale_worktree_dir',
+            description: `Remove the empty stale worktree directory at ${issuePath}.`,
+          });
+        }
+        const branch = issue.details?.branch;
+        if (
+          config &&
+          typeof branch === 'string' &&
+          branch.trim()
+        ) {
+          const divergence = await getAheadBehind(
+            seedRoot,
+            branch,
+            config.default_branch,
+          );
+          if (divergence && divergence.ahead === 0) {
+            plannedFixes.push({
+              id: 'delete_stale_branch',
+              description: `Delete the stale local branch ${branch} because it has no unique commits beyond ${config.default_branch}.`,
+            });
+          }
+        }
       } else if (issue.id === 'missing_registry_entry') {
         plannedFixes.push({
           id: 'add_missing_registry_entry',
           description: issue.message,
         });
+      } else if (
+        issue.id === 'orphan_managed_sibling' ||
+        issue.id === 'orphan_unmanaged_sibling'
+      ) {
+        const issuePath = issue.details?.path;
+        if (typeof issuePath === 'string' && await isEmptyDirectory(issuePath)) {
+          plannedFixes.push({
+            id: 'remove_orphan_sibling_dir',
+            description: `Remove the empty orphan sibling directory at ${issuePath}.`,
+          });
+        }
       } else if (issue.id === 'stale_lock') {
         plannedFixes.push({
           id: 'clear_expired_lock',
