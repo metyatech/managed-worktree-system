@@ -20,6 +20,15 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
+      - name: Upgrade npm to a trusted-publishing-capable release
+        # Node.js 22 ships with npm 10.x, but npm trusted publishing
+        # (OIDC with --provenance) requires npm >=11.5.1. Without this
+        # upgrade, the Publish step fails with an opaque `404 Not
+        # Found - PUT /<package>` because the registry rejects the
+        # OIDC exchange. Pin to the latest npm line so the workflow
+        # stays compatible as OIDC requirements evolve.
+        run: npm install --global npm@latest
+
       - name: Install dependencies
         run: npm ci
 
