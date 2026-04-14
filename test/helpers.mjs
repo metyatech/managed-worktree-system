@@ -66,7 +66,12 @@ export async function createRepoWithRemote() {
   await runGit(repoDir, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'init']);
   await runGit(repoDir, ['remote', 'add', 'origin', remoteDir]);
   await runGit(repoDir, ['push', '-u', 'origin', 'main']);
-  await runGit(rootDir, ['clone', remoteDir, updateDir]);
+  // Ubuntu runners with newer git (where clone defaults can leave HEAD
+  // detached and no local `main` branch checked out) break the
+  // follow-up `git push origin main` inside tests. `--branch main`
+  // forces the clone to land on a local branch named `main`, matching
+  // what happens implicitly on Windows and keeping CI behaviour stable.
+  await runGit(rootDir, ['clone', '--branch', 'main', remoteDir, updateDir]);
   return {
     rootDir,
     remoteDir,

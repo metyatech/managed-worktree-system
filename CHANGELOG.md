@@ -4,6 +4,16 @@
 
 - No unreleased changes.
 
+## 2.2.2 - 2026-04-14
+
+- Fix the `createRepoWithRemote` integration test fixture so the
+  Publish CI workflow passes on Ubuntu runners. Newer `git` versions
+  left the cloned `updateDir` with a detached HEAD and no local
+  `main` branch, which broke the follow-up `git push origin main`
+  in the `mwt sync` test. The fixture now clones with
+  `--branch main`, matching the implicit Windows behaviour the
+  existing tests assumed.
+
 ## 2.2.1 - 2026-04-14
 
 - Fix `createTaskWorktree` so it rolls back the worktree link, the on-disk
