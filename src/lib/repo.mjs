@@ -1003,11 +1003,13 @@ async function finalizeTaskCleanup(seedRoot, input) {
   const failures = [];
   const completedSteps = [];
   const worktreePath = input.taskRoot;
+  const removeTaskPath = input.removePath ?? removePath;
+  const removeTaskWorktree = input.removeWorktree ?? removeWorktree;
   const liveBefore = await isLiveGitWorktree(seedRoot, worktreePath);
   const pathBefore = await pathExists(worktreePath);
 
   if (liveBefore || pathBefore) {
-    const removeResult = await removeWorktree(seedRoot, worktreePath, true);
+    const removeResult = await removeTaskWorktree(seedRoot, worktreePath, true);
     if (removeResult.code !== 0) {
       pushCleanupFailure(
         failures,
@@ -1029,7 +1031,7 @@ async function finalizeTaskCleanup(seedRoot, input) {
   const pathStillExists = await pathExists(worktreePath);
   if (worktreeRemoved && pathStillExists) {
     try {
-      await removePath(worktreePath);
+      await removeTaskPath(worktreePath);
     } catch (error) {
       pushCleanupFailure(
         failures,
@@ -1067,7 +1069,7 @@ async function finalizeTaskCleanup(seedRoot, input) {
   }
 
   let stateRemoved = false;
-  if (worktreeRemoved) {
+  if (worktreeRemoved && taskPathRemoved) {
     try {
       await removeWorktreeStateEntry(seedRoot, input.worktreeId);
       stateRemoved = true;
@@ -1615,6 +1617,8 @@ export async function dropTaskWorktree(taskRoot, options = {}) {
     branch,
     deleteBranch: shouldDeleteBranch,
     forceBranchDelete: options.forceBranchDelete !== false,
+    removePath: options.removePath,
+    removeWorktree: options.removeWorktree,
   });
   if (cleanup.failures.length > 0) {
     throwCleanupIncomplete({
@@ -1782,6 +1786,8 @@ export async function pruneWorktrees(seedRoot, options = {}) {
       branch: item.branch,
       deleteBranch: canDeleteBranch,
       forceBranchDelete: options.force === true,
+      removePath: options.removePath,
+      removeWorktree: options.removeWorktree,
     });
     if (cleanup.stateRemoved) {
       pruned.push({
@@ -1852,12 +1858,12 @@ async function isEmptyDirectory(targetPath) {
   }
 }
 
-async function removeEmptyDirectoryIfPresent(targetPath) {
+async function removeEmptyDirectoryIfPresent(targetPath, removePathImpl = removePath) {
   if (!(await isEmptyDirectory(targetPath))) {
     return false;
   }
 
-  await removePath(targetPath);
+  await removePathImpl(targetPath);
   return !(await pathExists(targetPath));
 }
 
@@ -1903,6 +1909,7 @@ async function assessDoctorRepository(seedRoot, options = {}) {
   const completedSteps = [];
   const failures = [];
   const pendingStateActions = [];
+  const removeDoctorPath = options.removePath ?? removePath;
 
   for (const item of state.items) {
     if (!listedPaths.has(path.resolve(item.path))) {
@@ -1914,8 +1921,13 @@ async function assessDoctorRepository(seedRoot, options = {}) {
       });
 
       if (options.fix) {
+        const pathExistsBeforeFix = await pathExists(item.path);
+        let pathCleared = !pathExistsBeforeFix;
         try {
-          if (await removeEmptyDirectoryIfPresent(item.path)) {
+          if (
+            pathExistsBeforeFix &&
+            await removeEmptyDirectoryIfPresent(item.path, removeDoctorPath)
+          ) {
             recordCleanupAction(
               actions,
               completedSteps,
@@ -1925,6 +1937,7 @@ async function assessDoctorRepository(seedRoot, options = {}) {
               },
               `remove_empty_stale_worktree_dir: ${toPortablePath(item.path)}`
             );
+            pathCleared = true;
           }
         } catch (error) {
           pushCleanupFailure(
@@ -1934,6 +1947,7 @@ async function assessDoctorRepository(seedRoot, options = {}) {
             { path: toPortablePath(item.path) }
           );
         }
+        pathCleared ||= !(await pathExists(item.path));
         if (config && item.branch) {
           const divergence = await getAheadBehind(
             seedRoot,
@@ -1962,10 +1976,14 @@ async function assessDoctorRepository(seedRoot, options = {}) {
             }
           }
         }
-        pendingStateActions.push({
-          id: 'remove_stale_registry_entry',
-          worktreeId: item.worktreeId,
-        });
+        if (pathCleared) {
+          pendingStateActions.push({
+            id: 'remove_stale_registry_entry',
+            worktreeId: item.worktreeId,
+          });
+        } else {
+          nextItems.push(item);
+        }
         continue;
       }
     }
@@ -2169,12 +2187,18 @@ export async function planDoctorRepository(seedRoot, options = {}) {
   if (options.fix) {
     for (const issue of assessment.issues) {
       if (issue.id === 'stale_registry_entry') {
-        plannedFixes.push({
-          id: 'remove_stale_registry_entry',
-          description: issue.message,
-        });
         const issuePath = issue.details?.path;
-        if (typeof issuePath === 'string' && await isEmptyDirectory(issuePath)) {
+        const issuePathExists =
+          typeof issuePath === 'string' && await pathExists(issuePath);
+        const issuePathIsEmpty =
+          issuePathExists && await isEmptyDirectory(issuePath);
+        if (!issuePathExists || issuePathIsEmpty) {
+          plannedFixes.push({
+            id: 'remove_stale_registry_entry',
+            description: issue.message,
+          });
+        }
+        if (issuePathIsEmpty) {
           plannedFixes.push({
             id: 'remove_empty_stale_worktree_dir',
             description: `Remove the empty stale worktree directory at ${issuePath}.`,

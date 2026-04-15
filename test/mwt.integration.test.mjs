@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { pathExists } from '../src/lib/fs.mjs';
+import { pathExists, removePath } from '../src/lib/fs.mjs';
 import { MWT_MARKER_FILE } from '../src/lib/constants.mjs';
 import {
   createTaskWorktree,
@@ -431,6 +431,105 @@ test('mwt doctor --fix removes an empty stale worktree directory and deletes a s
   assert.equal(branchCheck.stdout.trim(), '');
 });
 
+test('removePath retries transient Windows busy errors before succeeding', async () => {
+  const rootDir = await createTempDir('mwt-remove-path-retry');
+  const targetPath = path.join(rootDir, 'busy-target');
+  await mkdir(path.join(targetPath, 'nested'), { recursive: true });
+  await writeFile(path.join(targetPath, 'nested', 'file.txt'), 'busy\n', 'utf8');
+
+  let attempts = 0;
+  await removePath(targetPath, {
+    platform: 'win32',
+    retryDelaysMs: [0, 0],
+    waitImpl: async () => {},
+    removeImpl: async (nextTargetPath) => {
+      attempts += 1;
+      if (attempts < 3) {
+        const error = new Error(`EBUSY: resource busy or locked, rmdir '${nextTargetPath}'`);
+        error.code = 'EBUSY';
+        throw error;
+      }
+
+      await rm(nextTargetPath, {
+        recursive: true,
+        force: true,
+      });
+    },
+  });
+
+  assert.equal(attempts, 3);
+  assert.equal(await pathExists(targetPath), false);
+});
+
+test('doctorRepository keeps a stale registry entry when path cleanup fails so regular doctor can retry it later', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const created = await createTaskWorktree(fixture.repoDir, 'doctor-busy-path');
+  await runGit(fixture.repoDir, ['worktree', 'remove', created.worktreePath, '--force']);
+  await mkdir(created.worktreePath, { recursive: true });
+
+  let caught = null;
+  try {
+    await doctorRepository(fixture.repoDir, {
+      fix: true,
+      removePath: async (targetPath) => {
+        if (path.resolve(targetPath) === path.resolve(created.worktreePath)) {
+          const error = new Error(`EBUSY: resource busy or locked, rmdir '${targetPath}'`);
+          error.code = 'EBUSY';
+          throw error;
+        }
+
+        await removePath(targetPath);
+      },
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, 'doctorRepository should surface incomplete cleanup');
+  assert.equal(caught.id, 'doctor_fix_incomplete');
+  assert.equal(await pathExists(created.worktreePath), true);
+  assert.equal(
+    caught.details.appliedActions.some(
+      (action) =>
+        action.id === 'remove_stale_registry_entry' &&
+        action.worktreeId === created.worktreeId
+    ),
+    false,
+  );
+  assert.equal(
+    caught.details.failures.some(
+      (failure) =>
+        failure.step === 'remove_empty_stale_worktree_dir' &&
+        failure.path === created.worktreePath.replaceAll('\\', '/')
+    ),
+    true,
+  );
+
+  let state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].worktreeId, created.worktreeId);
+
+  const retryResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const retryJson = JSON.parse(retryResult.stdout);
+  assert.equal(
+    retryJson.result.actions.some(
+      (action) =>
+        action.id === 'remove_stale_registry_entry' &&
+        action.worktreeId === created.worktreeId
+    ),
+    true,
+  );
+  assert.equal(await pathExists(created.worktreePath), false);
+
+  state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
+});
+
 test('mwt doctor --fix keeps a stale branch when it still has unique commits', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
@@ -634,6 +733,86 @@ test('pruneWorktrees continues other cleanup after one branch deletion fails', a
 
   const cleanBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', clean.branch]);
   assert.equal(cleanBranchCheck.stdout.trim(), '');
+});
+
+test('pruneWorktrees keeps state when path cleanup fails so regular doctor can finish the cleanup later', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const created = await createTaskWorktree(fixture.repoDir, 'prune-busy-path');
+  await writeFile(path.join(created.worktreePath, 'change.txt'), 'cleanup\n', 'utf8');
+  await runGit(created.worktreePath, ['add', 'change.txt']);
+  await runGit(created.worktreePath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'cleanup change',
+  ]);
+  await deliverTaskWorktree(created.worktreePath);
+
+  let caught = null;
+  try {
+    await pruneWorktrees(fixture.repoDir, {
+      merged: true,
+      withBranches: true,
+      removeWorktree: async (seedRoot, worktreePath) => {
+        const removeResult = await runGit(seedRoot, ['worktree', 'remove', worktreePath, '--force'], false);
+        if (removeResult.code === 0) {
+          await mkdir(worktreePath, { recursive: true });
+        }
+        return removeResult;
+      },
+      removePath: async (targetPath) => {
+        if (path.resolve(targetPath) === path.resolve(created.worktreePath)) {
+          const error = new Error(`EBUSY: resource busy or locked, rmdir '${targetPath}'`);
+          error.code = 'EBUSY';
+          throw error;
+        }
+
+        await removePath(targetPath);
+      },
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, 'pruneWorktrees should report incomplete cleanup');
+  assert.equal(caught.id, 'prune_cleanup_incomplete');
+  assert.equal(await pathExists(created.worktreePath), true);
+  assert.equal(
+    caught.details.failures.some(
+      (failure) =>
+        failure.worktreeId === created.worktreeId &&
+        failure.stateRemoved === false &&
+        failure.failures.some((detail) => detail.step === 'remove_path')
+    ),
+    true,
+  );
+
+  let state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].worktreeId, created.worktreeId);
+
+  const retryResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const retryJson = JSON.parse(retryResult.stdout);
+  assert.equal(
+    retryJson.result.actions.some(
+      (action) =>
+        action.id === 'remove_stale_registry_entry' &&
+        action.worktreeId === created.worktreeId
+    ),
+    true,
+  );
+  assert.equal(await pathExists(created.worktreePath), false);
+
+  state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
 });
 
 test('mwt create --dry-run returns a creation plan without mutating the repository', async () => {
