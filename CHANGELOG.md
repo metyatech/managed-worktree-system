@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.2.8 - 2026-04-15
+
 - Refuse to drop or prune a task worktree while any process holds it as its
   current working directory on Windows, raising `drop_cwd_holders` with the
   offending PIDs, process names, and paths so the operator can resolve the
