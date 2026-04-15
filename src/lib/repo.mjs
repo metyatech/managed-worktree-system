@@ -62,6 +62,7 @@ import {
 } from './git.mjs';
 import { clearExpiredLocks, listLocks, lockIssueFromRecord } from './locks.mjs';
 import { runShell } from './process.mjs';
+import { findProcessesHoldingCwd } from './process-cwd.mjs';
 
 export function slugifyName(name) {
   const slug = name
@@ -1751,9 +1752,42 @@ async function collectUnexpectedUntracked(taskRoot, item = null) {
   return untracked.filter((entry) => !allowedUntracked.has(entry));
 }
 
-async function assertTaskDropSafe(taskRoot, item = null, force = false) {
+async function assertTaskDropSafe(
+  taskRoot,
+  item = null,
+  force = false,
+  options = {},
+) {
   if (!(await pathExists(taskRoot))) {
     return;
+  }
+
+  // The CWD check runs before the force short-circuit: on Windows, the
+  // OS refuses to delete a directory that any process holds as its
+  // current working directory, so --force cannot override it. Surface
+  // the offending processes with a specific error instead of letting
+  // the subsequent `git worktree remove` / rmdir fail with a generic
+  // EBUSY further down the pipeline.
+  const findHolders =
+    options.findProcessesHoldingCwd ?? findProcessesHoldingCwd;
+  const cwdHolders = await findHolders(taskRoot);
+  if (cwdHolders.length > 0) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSAFE_PRUNE_TARGET,
+      id: 'drop_cwd_holders',
+      message:
+        'Cannot drop a task worktree while other processes hold it as their current working directory.',
+      details: {
+        taskPath: toPortablePath(taskRoot),
+        holders: cwdHolders.map((holder) => ({
+          pid: holder.pid,
+          name: holder.name,
+          cwd: toPortablePath(holder.cwd),
+        })),
+        recovery:
+          'Return the calling shell to a directory outside the worktree, stop any background processes (sleep, dev servers, language servers) that cd into it, then rerun mwt prune.',
+      },
+    });
   }
 
   if ((await hasTrackedChanges(taskRoot)) && !force) {
@@ -1803,7 +1837,9 @@ export async function dropTaskWorktree(taskRoot, options = {}) {
   const branch = item?.branch ?? marker.branch;
   const shouldDeleteBranch = options.deleteBranch === true;
 
-  await assertTaskDropSafe(taskRoot, item, options.force === true);
+  await assertTaskDropSafe(taskRoot, item, options.force === true, {
+    findProcessesHoldingCwd: options.findProcessesHoldingCwd,
+  });
   const cleanup = await finalizeTaskCleanup(seedRoot, {
     taskRoot,
     worktreeId: marker.worktreeId,
@@ -1857,7 +1893,9 @@ export async function planDropTaskWorktree(taskRoot, options = {}) {
   const branch = item?.branch ?? marker.branch;
   const shouldDeleteBranch = options.deleteBranch === true;
 
-  await assertTaskDropSafe(taskRoot, item, options.force === true);
+  await assertTaskDropSafe(taskRoot, item, options.force === true, {
+    findProcessesHoldingCwd: options.findProcessesHoldingCwd,
+  });
 
   return {
     dryRun: true,
@@ -1980,7 +2018,9 @@ export async function pruneWorktrees(seedRoot, options = {}) {
     }
 
     if (await pathExists(item.path)) {
-      await assertTaskDropSafe(item.path, item, options.force);
+      await assertTaskDropSafe(item.path, item, options.force, {
+        findProcessesHoldingCwd: options.findProcessesHoldingCwd,
+      });
     }
 
     const canDeleteBranch = options.withBranches

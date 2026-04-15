@@ -1460,3 +1460,75 @@ test('mwt blocks concurrent state-changing operations with a repository lock', a
   const firstResult = await firstCreate;
   assert.equal(firstResult.code, 0, firstResult.stderr || firstResult.stdout);
 });
+
+test('dropTaskWorktree refuses to remove a worktree while a process holds it as CWD', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+  const created = await createTaskWorktree(fixture.repoDir, 'cwd-lock-drop');
+
+  let caught = null;
+  try {
+    await dropTaskWorktree(created.worktreePath, {
+      force: true,
+      findProcessesHoldingCwd: async () => [
+        { pid: 12345, name: 'bash', cwd: created.worktreePath },
+      ],
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, 'dropTaskWorktree should refuse while a process holds CWD');
+  assert.equal(caught.id, 'drop_cwd_holders');
+  assert.equal(caught.details.holders.length, 1);
+  assert.equal(caught.details.holders[0].pid, 12345);
+  assert.equal(caught.details.holders[0].name, 'bash');
+  assert.equal(await pathExists(created.worktreePath), true);
+});
+
+test('pruneWorktrees refuses to prune a delivered worktree while a process holds it as CWD', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+  const created = await createTaskWorktree(fixture.repoDir, 'cwd-lock-prune');
+
+  await writeFile(
+    path.join(created.worktreePath, 'change.txt'),
+    'edit\n',
+    'utf8',
+  );
+  await runGit(created.worktreePath, ['add', 'change.txt']);
+  await runGit(created.worktreePath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'prune-with-cwd-lock',
+  ]);
+  await deliverTaskWorktree(created.worktreePath);
+
+  let caught = null;
+  try {
+    await pruneWorktrees(fixture.repoDir, {
+      merged: true,
+      withBranches: true,
+      findProcessesHoldingCwd: async (target) => [
+        { pid: 54321, name: 'node', cwd: target },
+      ],
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, 'pruneWorktrees should refuse while a process holds CWD');
+  assert.equal(caught.id, 'drop_cwd_holders');
+  assert.equal(caught.details.holders[0].pid, 54321);
+  assert.equal(await pathExists(created.worktreePath), true);
+});

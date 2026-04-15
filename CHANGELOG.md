@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Refuse to drop or prune a task worktree while any process holds it as its
+  current working directory on Windows, raising `drop_cwd_holders` with the
+  offending PIDs, process names, and paths so the operator can resolve the
+  lock before retrying. The check runs even under `--force` because the
+  Windows kernel will reject the directory removal regardless.
+- Add regression coverage for the CWD-holder refusal in both `dropTaskWorktree`
+  and `pruneWorktrees`.
+
 ## 2.2.7 - 2026-04-15
 
 - Retry Windows worktree-directory removal when transient `EBUSY`, `EPERM`, or
