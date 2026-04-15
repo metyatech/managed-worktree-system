@@ -286,9 +286,10 @@ Flow:
 2. Verify the seed worktree has no tracked changes.
 3. Fetch the remote base branch.
 4. Create a sibling worktree from `origin/<base>`.
-5. Write `.mwt-worktree.json` into the new worktree.
-6. Copy allowlisted ignored files from the seed worktree.
-7. Run project bootstrap hooks.
+5. Initialize Git submodules in the new worktree when `.gitmodules` exists.
+6. Write `.mwt-worktree.json` into the new worktree.
+7. Copy allowlisted ignored files from the seed worktree.
+8. Run project bootstrap hooks.
 
 ### `mwt deliver`
 

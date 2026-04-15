@@ -34,20 +34,39 @@ async function createLocalSubmoduleRepo(rootDir, repoName = 'rules-submodule') {
     'utf8',
   );
   await runGit(repoDir, ['add', '.']);
-  await runGit(repoDir, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'init submodule']);
+  await runGit(repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'init submodule',
+  ]);
   return repoDir;
 }
 
 test('mwt init keeps the seed as a normal non-bare repo and doctor passes', async () => {
   const fixture = await createRepoWithRemote();
 
-  const initResult = await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const initResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--json',
+  ]);
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.ok, true);
   assert.equal(await pathExists(path.join(fixture.repoDir, '.bare')), false);
   assert.equal(await pathExists(path.join(fixture.repoDir, '.git')), true);
-  assert.equal(await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')), true);
-  assert.equal(await pathExists(path.join(fixture.repoDir, MWT_MARKER_FILE)), true);
+  assert.equal(
+    await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')),
+    true,
+  );
+  assert.equal(
+    await pathExists(path.join(fixture.repoDir, MWT_MARKER_FILE)),
+    true,
+  );
 
   const marker = await readJson(path.join(fixture.repoDir, MWT_MARKER_FILE));
   assert.equal('bareGitDir' in marker, false);
@@ -61,7 +80,11 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
   const seedStatus = await runGit(fixture.repoDir, ['status', '--short']);
   assert.doesNotMatch(seedStatus.stdout, /\.mwt-worktree\.json/u);
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--deep', '--json']);
+  const doctorResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--deep',
+    '--json',
+  ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(doctorJson.result.issues.length, 0);
 });
@@ -69,7 +92,13 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
 test('mwt init rejects a linked worktree as the seed', async () => {
   const fixture = await createRepoWithRemote();
   const linkedPath = path.join(fixture.rootDir, 'linked-seed');
-  await runGit(fixture.repoDir, ['worktree', 'add', linkedPath, '-b', 'linked-seed']);
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    linkedPath,
+    '-b',
+    'linked-seed',
+  ]);
 
   const initResult = await runCli(linkedPath, ['init', '--json'], 12);
   const initJson = JSON.parse(initResult.stdout);
@@ -88,18 +117,33 @@ test('mwt init rejects a bare repository', async () => {
 
 test('every CLI subcommand returns command-specific help with -h', async () => {
   const fixture = await createRepoWithRemote();
-  const commands = ['init', 'create', 'list', 'deliver', 'sync', 'drop', 'prune', 'doctor', 'version'];
+  const commands = [
+    'init',
+    'create',
+    'list',
+    'deliver',
+    'sync',
+    'drop',
+    'prune',
+    'doctor',
+    'version',
+  ];
 
   for (const command of commands) {
     const helpResult = await runCli(fixture.repoDir, [command, '-h']);
-    assert.match(helpResult.stdout, new RegExp(`^Usage: mwt ${command}\\b`, 'u'));
+    assert.match(
+      helpResult.stdout,
+      new RegExp(`^Usage: mwt ${command}\\b`, 'u'),
+    );
     assert.doesNotMatch(helpResult.stdout, /^Commands:/mu);
   }
 });
 
 test('mwt version subcommand prints the package version', async () => {
   const fixture = await createRepoWithRemote();
-  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const packageJson = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  );
 
   const versionResult = await runCli(fixture.repoDir, ['version']);
   assert.equal(versionResult.stdout, packageJson.version);
@@ -109,7 +153,11 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
 
-  const createResult = await runCli(fixture.repoDir, ['create', 'feature-auth', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'feature-auth',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
   assert.equal(await pathExists(path.join(taskPath, MWT_MARKER_FILE)), true);
@@ -123,23 +171,55 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
 
   const listResult = await runCli(fixture.repoDir, ['list', '--json']);
   const listJson = JSON.parse(listResult.stdout);
-  assert.equal(listJson.result.items.some((item) => item.kind === 'seed'), true);
-  assert.equal(listJson.result.items.some((item) => item.kind === 'task'), true);
+  assert.equal(
+    listJson.result.items.some((item) => item.kind === 'seed'),
+    true,
+  );
+  assert.equal(
+    listJson.result.items.some((item) => item.kind === 'task'),
+    true,
+  );
 });
 
 test('mwt create initializes submodules in the new task worktree before hooks run', async () => {
   const fixture = await createRepoWithRemote();
   const submoduleRepo = await createLocalSubmoduleRepo(fixture.rootDir);
   await runGit(fixture.repoDir, ['config', 'protocol.file.allow', 'always']);
-  await runGit(
-    fixture.repoDir,
-    ['-c', 'protocol.file.allow=always', 'submodule', 'add', submoduleRepo, 'agent-rules-private'],
-  );
+  await runGit(fixture.repoDir, [
+    '-c',
+    'protocol.file.allow=always',
+    'submodule',
+    'add',
+    submoduleRepo,
+    'agent-rules-private',
+  ]);
   await runGit(fixture.repoDir, ['add', '.gitmodules', 'agent-rules-private']);
-  await runGit(fixture.repoDir, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'add rules submodule']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'add rules submodule',
+  ]);
   await runGit(fixture.repoDir, ['push', 'origin', 'main']);
 
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const dryRunResult = await runCli(fixture.repoDir, [
+    'create',
+    'preview-submodule',
+    '--dry-run',
+    '--json',
+  ]);
+  const dryRunJson = JSON.parse(dryRunResult.stdout);
+  assert.equal(
+    dryRunJson.result.actions.some(
+      (action) => action.id === 'update_submodules',
+    ),
+    true,
+  );
+
   const createResult = await runCli(
     fixture.repoDir,
     ['create', 'feature-submodule', '--json'],
@@ -154,11 +234,84 @@ test('mwt create initializes submodules in the new task worktree before hooks ru
   const taskPath = createJson.result.worktreePath;
 
   assert.equal(
-    await pathExists(path.join(taskPath, 'agent-rules-private', 'rules', 'course-site-metadata.md')),
+    await pathExists(
+      path.join(
+        taskPath,
+        'agent-rules-private',
+        'rules',
+        'course-site-metadata.md',
+      ),
+    ),
     true,
   );
 
-  const submoduleStatus = await runGit(taskPath, ['submodule', 'status', '--recursive']);
+  const submoduleStatus = await runGit(taskPath, [
+    'submodule',
+    'status',
+    '--recursive',
+  ]);
+  assert.doesNotMatch(submoduleStatus.stdout, /^-/mu);
+});
+
+test('mwt create initializes submodules from fetched base even when the seed is not synced', async () => {
+  const fixture = await createRepoWithRemote();
+  const submoduleRepo = await createLocalSubmoduleRepo(
+    fixture.rootDir,
+    'late-rules-submodule',
+  );
+  await runGit(fixture.updateDir, [
+    '-c',
+    'protocol.file.allow=always',
+    'submodule',
+    'add',
+    submoduleRepo,
+    'agent-rules-private',
+  ]);
+  await runGit(fixture.updateDir, ['add', '.gitmodules', 'agent-rules-private']);
+  await runGit(fixture.updateDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'add late rules submodule',
+  ]);
+  await runGit(fixture.updateDir, ['push', 'origin', 'main']);
+
+  assert.equal(await pathExists(path.join(fixture.repoDir, '.gitmodules')), false);
+
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(
+    fixture.repoDir,
+    ['create', 'fetched-submodule', '--json'],
+    0,
+    {
+      env: {
+        GIT_ALLOW_PROTOCOL: 'file',
+      },
+    },
+  );
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+
+  assert.equal(
+    await pathExists(
+      path.join(
+        taskPath,
+        'agent-rules-private',
+        'rules',
+        'course-site-metadata.md',
+      ),
+    ),
+    true,
+  );
+
+  const submoduleStatus = await runGit(taskPath, [
+    'submodule',
+    'status',
+    '--recursive',
+  ]);
   assert.doesNotMatch(submoduleStatus.stdout, /^-/mu);
 });
 
@@ -169,16 +322,25 @@ test('programmatic createTaskWorktree supports manager-specific path, branch, an
     remote: 'origin',
   });
 
-  const created = await createTaskWorktree(fixture.repoDir, 'assign_q_1234_fix-queue', {
-    createdBy: 'manager',
-    pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
-    branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
-  });
+  const created = await createTaskWorktree(
+    fixture.repoDir,
+    'assign_q_1234_fix-queue',
+    {
+      createdBy: 'manager',
+      pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
+      branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
+    },
+  );
 
-  assert.match(path.basename(created.worktreePath), /^repo-mgr-assign_q_1234_fix-queue-[0-9a-f]{8}$/u);
+  assert.match(
+    path.basename(created.worktreePath),
+    /^repo-mgr-assign_q_1234_fix-queue-[0-9a-f]{8}$/u,
+  );
   assert.match(created.branch, /^mgr\/assign_q_1234_fix-queue\/[0-9a-f]{8}$/u);
 
-  const marker = await readJson(path.join(created.worktreePath, MWT_MARKER_FILE));
+  const marker = await readJson(
+    path.join(created.worktreePath, MWT_MARKER_FILE),
+  );
   assert.equal(marker.createdBy, 'manager');
 });
 
@@ -192,68 +354,128 @@ test('mwt sync fails on dirty seed and fast-forwards clean seed after remote upd
   assert.equal(dirtyJson.error.id, 'seed_tracked_dirty');
 
   await runGit(fixture.repoDir, ['checkout', '--', 'README.md']);
-  await writeFile(path.join(fixture.updateDir, 'README.md'), '# Updated remotely\n', 'utf8');
+  await writeFile(
+    path.join(fixture.updateDir, 'README.md'),
+    '# Updated remotely\n',
+    'utf8',
+  );
   await runGit(fixture.updateDir, ['add', 'README.md']);
-  await runGit(fixture.updateDir, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'remote update']);
+  await runGit(fixture.updateDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remote update',
+  ]);
   await runGit(fixture.updateDir, ['push', 'origin', 'main']);
 
   const syncResult = await runCli(fixture.repoDir, ['sync', '--json']);
   const syncJson = JSON.parse(syncResult.stdout);
   assert.equal(syncJson.ok, true);
 
-  const readme = await readFile(path.join(fixture.repoDir, 'README.md'), 'utf8');
+  const readme = await readFile(
+    path.join(fixture.repoDir, 'README.md'),
+    'utf8',
+  );
   assert.equal(readme, '# Updated remotely\n');
 });
 
 test('mwt deliver pushes committed task changes and prune removes delivered worktree', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-  const createResult = await runCli(fixture.repoDir, ['create', 'ship-it', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'ship-it',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
 
   await writeFile(path.join(taskPath, 'README.md'), '# Delivered\n', 'utf8');
   await runGit(taskPath, ['add', 'README.md']);
-  await runGit(taskPath, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'task change']);
+  await runGit(taskPath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'task change',
+  ]);
 
-  const deliverResult = await runCli(fixture.repoDir, ['deliver', 'ship-it', '--json']);
+  const deliverResult = await runCli(fixture.repoDir, [
+    'deliver',
+    'ship-it',
+    '--json',
+  ]);
   const deliverJson = JSON.parse(deliverResult.stdout);
   assert.equal(deliverJson.ok, true);
 
-  const seedReadme = await readFile(path.join(fixture.repoDir, 'README.md'), 'utf8');
+  const seedReadme = await readFile(
+    path.join(fixture.repoDir, 'README.md'),
+    'utf8',
+  );
   assert.equal(seedReadme, '# Delivered\n');
 
   await runGit(fixture.updateDir, ['pull', '--ff-only', 'origin', 'main']);
-  const remoteReadme = await readFile(path.join(fixture.updateDir, 'README.md'), 'utf8');
+  const remoteReadme = await readFile(
+    path.join(fixture.updateDir, 'README.md'),
+    'utf8',
+  );
   assert.equal(remoteReadme, '# Delivered\n');
 
-  const pruneResult = await runCli(fixture.repoDir, ['prune', '--merged', '--with-branches', '--json']);
+  const pruneResult = await runCli(fixture.repoDir, [
+    'prune',
+    '--merged',
+    '--with-branches',
+    '--json',
+  ]);
   const pruneJson = JSON.parse(pruneResult.stdout);
   assert.equal(pruneJson.result.pruned.length, 1);
   assert.equal(await pathExists(taskPath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 });
 
 test('mwt drop removes an active task worktree and deletes its branch', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-  const createResult = await runCli(fixture.repoDir, ['create', 'drop-it', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'drop-it',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
   const taskBranch = createJson.result.branch;
 
-  const dropResult = await runCli(fixture.repoDir, ['drop', 'drop-it', '--delete-branch', '--force-branch-delete', '--json']);
+  const dropResult = await runCli(fixture.repoDir, [
+    'drop',
+    'drop-it',
+    '--delete-branch',
+    '--force-branch-delete',
+    '--json',
+  ]);
   const dropJson = JSON.parse(dropResult.stdout);
   assert.equal(dropJson.ok, true);
   assert.equal(dropJson.result.branchDeleted, true);
   assert.equal(await pathExists(taskPath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
-  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    taskBranch,
+  ]);
   assert.equal(branchCheck.stdout.trim(), '');
 });
 
@@ -285,7 +507,10 @@ always_fails = "exit 1"
   } catch (error) {
     caught = error;
   }
-  assert.ok(caught, 'createTaskWorktree should throw when post_create hook fails');
+  assert.ok(
+    caught,
+    'createTaskWorktree should throw when post_create hook fails',
+  );
   assert.equal(caught.id, 'hook_failed');
 
   // The worktree path and branch must be gone: no phantom directories,
@@ -293,19 +518,29 @@ always_fails = "exit 1"
   const listResult = await runGit(fixture.repoDir, ['worktree', 'list']);
   assert.doesNotMatch(listResult.stdout, /post-create-failure/u);
 
-  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', '*post-create-failure*']);
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    '*post-create-failure*',
+  ]);
   assert.equal(branchCheck.stdout.trim(), '');
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
   // The next createTaskWorktree with the same name must succeed
   // (would fail with `worktree_path_occupied` if the directory was
   // left behind).
   await writeFile(configPath, originalConfig, 'utf8');
-  const retry = await createTaskWorktree(fixture.repoDir, 'post-create-failure', {
-    yes: true,
-  });
+  const retry = await createTaskWorktree(
+    fixture.repoDir,
+    'post-create-failure',
+    {
+      yes: true,
+    },
+  );
   assert.equal(await pathExists(retry.worktreePath), true);
 });
 
@@ -315,11 +550,15 @@ test('programmatic dropTaskWorktree removes an active manager task worktree and 
     base: 'main',
     remote: 'origin',
   });
-  const created = await createTaskWorktree(fixture.repoDir, 'drop-manager-task', {
-    createdBy: 'manager',
-    pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
-    branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
-  });
+  const created = await createTaskWorktree(
+    fixture.repoDir,
+    'drop-manager-task',
+    {
+      createdBy: 'manager',
+      pathTemplate: '{{ seed_parent }}/{{ repo }}-mgr-{{ slug }}-{{ shortid }}',
+      branchTemplate: 'mgr/{{ slug }}/{{ shortid }}',
+    },
+  );
 
   const dropped = await dropTaskWorktree(created.worktreePath, {
     force: true,
@@ -329,10 +568,16 @@ test('programmatic dropTaskWorktree removes an active manager task worktree and 
   assert.equal(dropped.branchDeleted, true);
   assert.equal(await pathExists(created.worktreePath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
-  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', created.branch]);
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    created.branch,
+  ]);
   assert.equal(branchCheck.stdout.trim(), '');
 });
 
@@ -342,7 +587,10 @@ test('dropTaskWorktree removes state even when branch deletion fails after the w
     base: 'main',
     remote: 'origin',
   });
-  const created = await createTaskWorktree(fixture.repoDir, 'drop-branch-failure');
+  const created = await createTaskWorktree(
+    fixture.repoDir,
+    'drop-branch-failure',
+  );
 
   await writeFile(
     path.join(created.worktreePath, 'README.md'),
@@ -375,17 +623,30 @@ test('dropTaskWorktree removes state even when branch deletion fails after the w
   assert.equal(caught.id, 'drop_cleanup_incomplete');
   assert.equal(await pathExists(created.worktreePath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
-  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', created.branch]);
-  assert.match(branchCheck.stdout, new RegExp(created.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    created.branch,
+  ]);
+  assert.match(
+    branchCheck.stdout,
+    new RegExp(created.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+  );
 });
 
 test('mwt doctor --fix rebuilds a missing worktree registry entry', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-  const createResult = await runCli(fixture.repoDir, ['create', 'registry-fix', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'registry-fix',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
   const marker = await readJson(path.join(taskPath, MWT_MARKER_FILE));
@@ -396,15 +657,28 @@ test('mwt doctor --fix rebuilds a missing worktree registry entry', async () => 
     'utf8',
   );
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const doctorResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--fix',
+    '--json',
+  ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
-  assert.equal(doctorJson.result.actions.some((action) => action.worktreeId === marker.worktreeId), true);
+  assert.equal(
+    doctorJson.result.actions.some(
+      (action) => action.worktreeId === marker.worktreeId,
+    ),
+    true,
+  );
 });
 
 test('mwt doctor --fix removes an empty stale worktree directory and deletes a stale branch with no unique commits', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-  const createResult = await runCli(fixture.repoDir, ['create', 'stale-empty', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'stale-empty',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
   const taskBranch = createJson.result.branch;
@@ -412,22 +686,37 @@ test('mwt doctor --fix removes an empty stale worktree directory and deletes a s
   await runGit(fixture.repoDir, ['worktree', 'remove', taskPath, '--force']);
   await mkdir(taskPath, { recursive: true });
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const doctorResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--fix',
+    '--json',
+  ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(
-    doctorJson.result.actions.some((action) => action.id === 'remove_empty_stale_worktree_dir'),
+    doctorJson.result.actions.some(
+      (action) => action.id === 'remove_empty_stale_worktree_dir',
+    ),
     true,
   );
   assert.equal(
-    doctorJson.result.actions.some((action) => action.id === 'delete_stale_branch' && action.branch === taskBranch),
+    doctorJson.result.actions.some(
+      (action) =>
+        action.id === 'delete_stale_branch' && action.branch === taskBranch,
+    ),
     true,
   );
   assert.equal(await pathExists(taskPath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
-  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    taskBranch,
+  ]);
   assert.equal(branchCheck.stdout.trim(), '');
 });
 
@@ -435,7 +724,11 @@ test('removePath retries transient Windows busy errors before succeeding', async
   const rootDir = await createTempDir('mwt-remove-path-retry');
   const targetPath = path.join(rootDir, 'busy-target');
   await mkdir(path.join(targetPath, 'nested'), { recursive: true });
-  await writeFile(path.join(targetPath, 'nested', 'file.txt'), 'busy\n', 'utf8');
+  await writeFile(
+    path.join(targetPath, 'nested', 'file.txt'),
+    'busy\n',
+    'utf8',
+  );
 
   let attempts = 0;
   await removePath(targetPath, {
@@ -445,7 +738,9 @@ test('removePath retries transient Windows busy errors before succeeding', async
     removeImpl: async (nextTargetPath) => {
       attempts += 1;
       if (attempts < 3) {
-        const error = new Error(`EBUSY: resource busy or locked, rmdir '${nextTargetPath}'`);
+        const error = new Error(
+          `EBUSY: resource busy or locked, rmdir '${nextTargetPath}'`,
+        );
         error.code = 'EBUSY';
         throw error;
       }
@@ -469,7 +764,12 @@ test('doctorRepository keeps a stale registry entry when path cleanup fails so r
   });
 
   const created = await createTaskWorktree(fixture.repoDir, 'doctor-busy-path');
-  await runGit(fixture.repoDir, ['worktree', 'remove', created.worktreePath, '--force']);
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'remove',
+    created.worktreePath,
+    '--force',
+  ]);
   await mkdir(created.worktreePath, { recursive: true });
 
   let caught = null;
@@ -478,7 +778,9 @@ test('doctorRepository keeps a stale registry entry when path cleanup fails so r
       fix: true,
       removePath: async (targetPath) => {
         if (path.resolve(targetPath) === path.resolve(created.worktreePath)) {
-          const error = new Error(`EBUSY: resource busy or locked, rmdir '${targetPath}'`);
+          const error = new Error(
+            `EBUSY: resource busy or locked, rmdir '${targetPath}'`,
+          );
           error.code = 'EBUSY';
           throw error;
         }
@@ -497,7 +799,7 @@ test('doctorRepository keeps a stale registry entry when path cleanup fails so r
     caught.details.appliedActions.some(
       (action) =>
         action.id === 'remove_stale_registry_entry' &&
-        action.worktreeId === created.worktreeId
+        action.worktreeId === created.worktreeId,
     ),
     false,
   );
@@ -505,56 +807,94 @@ test('doctorRepository keeps a stale registry entry when path cleanup fails so r
     caught.details.failures.some(
       (failure) =>
         failure.step === 'remove_empty_stale_worktree_dir' &&
-        failure.path === created.worktreePath.replaceAll('\\', '/')
+        failure.path === created.worktreePath.replaceAll('\\', '/'),
     ),
     true,
   );
 
-  let state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  let state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 1);
   assert.equal(state.items[0].worktreeId, created.worktreeId);
 
-  const retryResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const retryResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--fix',
+    '--json',
+  ]);
   const retryJson = JSON.parse(retryResult.stdout);
   assert.equal(
     retryJson.result.actions.some(
       (action) =>
         action.id === 'remove_stale_registry_entry' &&
-        action.worktreeId === created.worktreeId
+        action.worktreeId === created.worktreeId,
     ),
     true,
   );
   assert.equal(await pathExists(created.worktreePath), false);
 
-  state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 });
 
 test('mwt doctor --fix keeps a stale branch when it still has unique commits', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-  const createResult = await runCli(fixture.repoDir, ['create', 'stale-unique', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'stale-unique',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
   const taskBranch = createJson.result.branch;
 
-  await writeFile(path.join(taskPath, 'README.md'), '# Unique stale branch\n', 'utf8');
+  await writeFile(
+    path.join(taskPath, 'README.md'),
+    '# Unique stale branch\n',
+    'utf8',
+  );
   await runGit(taskPath, ['add', 'README.md']);
-  await runGit(taskPath, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'unique branch change']);
+  await runGit(taskPath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'unique branch change',
+  ]);
 
   await runGit(fixture.repoDir, ['worktree', 'remove', taskPath, '--force']);
   await mkdir(taskPath, { recursive: true });
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const doctorResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--fix',
+    '--json',
+  ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(
-    doctorJson.result.actions.some((action) => action.id === 'delete_stale_branch' && action.branch === taskBranch),
+    doctorJson.result.actions.some(
+      (action) =>
+        action.id === 'delete_stale_branch' && action.branch === taskBranch,
+    ),
     false,
   );
   assert.equal(await pathExists(taskPath), false);
 
-  const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
-  assert.match(branchCheck.stdout, new RegExp(taskBranch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    taskBranch,
+  ]);
+  assert.match(
+    branchCheck.stdout,
+    new RegExp(taskBranch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+  );
 });
 
 test('doctorRepository reports structured incomplete fix details and continues other stale repairs', async () => {
@@ -564,16 +904,40 @@ test('doctorRepository reports structured incomplete fix details and continues o
     remote: 'origin',
   });
 
-  const blocked = await createTaskWorktree(fixture.repoDir, 'doctor-blocked-branch');
-  const clean = await createTaskWorktree(fixture.repoDir, 'doctor-clean-branch');
+  const blocked = await createTaskWorktree(
+    fixture.repoDir,
+    'doctor-blocked-branch',
+  );
+  const clean = await createTaskWorktree(
+    fixture.repoDir,
+    'doctor-clean-branch',
+  );
 
-  await runGit(fixture.repoDir, ['worktree', 'remove', blocked.worktreePath, '--force']);
-  await runGit(fixture.repoDir, ['worktree', 'remove', clean.worktreePath, '--force']);
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'remove',
+    blocked.worktreePath,
+    '--force',
+  ]);
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'remove',
+    clean.worktreePath,
+    '--force',
+  ]);
   await mkdir(blocked.worktreePath, { recursive: true });
   await mkdir(clean.worktreePath, { recursive: true });
 
-  const blockingWorktreePath = path.join(fixture.rootDir, 'doctor-blocking-branch-holder');
-  await runGit(fixture.repoDir, ['worktree', 'add', blockingWorktreePath, blocked.branch]);
+  const blockingWorktreePath = path.join(
+    fixture.rootDir,
+    'doctor-blocking-branch-holder',
+  );
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    blockingWorktreePath,
+    blocked.branch,
+  ]);
 
   let caught = null;
   try {
@@ -584,25 +948,41 @@ test('doctorRepository reports structured incomplete fix details and continues o
     caught = error;
   }
 
-  assert.ok(caught, 'doctorRepository should report incomplete cleanup details');
+  assert.ok(
+    caught,
+    'doctorRepository should report incomplete cleanup details',
+  );
   assert.equal(caught.id, 'doctor_fix_incomplete');
   assert.equal(await pathExists(blocked.worktreePath), false);
   assert.equal(await pathExists(clean.worktreePath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
-  const blockedBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', blocked.branch]);
-  assert.match(blockedBranchCheck.stdout, new RegExp(blocked.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  const blockedBranchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    blocked.branch,
+  ]);
+  assert.match(
+    blockedBranchCheck.stdout,
+    new RegExp(blocked.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+  );
 
-  const cleanBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', clean.branch]);
+  const cleanBranchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    clean.branch,
+  ]);
   assert.equal(cleanBranchCheck.stdout.trim(), '');
 
   assert.equal(
     caught.details.appliedActions.some(
       (action) =>
         action.id === 'remove_stale_registry_entry' &&
-        action.worktreeId === blocked.worktreeId
+        action.worktreeId === blocked.worktreeId,
     ),
     true,
   );
@@ -610,15 +990,14 @@ test('doctorRepository reports structured incomplete fix details and continues o
     caught.details.appliedActions.some(
       (action) =>
         action.id === 'remove_stale_registry_entry' &&
-        action.worktreeId === clean.worktreeId
+        action.worktreeId === clean.worktreeId,
     ),
     true,
   );
   assert.equal(
     caught.details.appliedActions.some(
       (action) =>
-        action.id === 'delete_stale_branch' &&
-        action.branch === clean.branch
+        action.id === 'delete_stale_branch' && action.branch === clean.branch,
     ),
     true,
   );
@@ -626,7 +1005,7 @@ test('doctorRepository reports structured incomplete fix details and continues o
     caught.details.failures.some(
       (failure) =>
         failure.step === 'delete_stale_branch' &&
-        failure.branch === blocked.branch
+        failure.branch === blocked.branch,
     ),
     true,
   );
@@ -636,22 +1015,46 @@ test('mwt doctor --deep --fix clears expired lock files', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
 
-  const lockPath = path.join(fixture.repoDir, '.mwt', 'state', 'locks', 'stale-task.json');
-  await writeFile(lockPath, JSON.stringify({
-    version: 1,
-    scope: 'stale-task',
-    token: 'expired-token',
-    seedRoot: fixture.repoDir.replaceAll('\\', '/'),
-    command: 'create',
-    pid: 1234,
-    host: 'fixture-host',
-    acquiredAt: '2026-04-10T00:00:00.000Z',
-    expiresAt: '2026-04-10T00:05:00.000Z',
-  }, null, 2), 'utf8');
+  const lockPath = path.join(
+    fixture.repoDir,
+    '.mwt',
+    'state',
+    'locks',
+    'stale-task.json',
+  );
+  await writeFile(
+    lockPath,
+    JSON.stringify(
+      {
+        version: 1,
+        scope: 'stale-task',
+        token: 'expired-token',
+        seedRoot: fixture.repoDir.replaceAll('\\', '/'),
+        command: 'create',
+        pid: 1234,
+        host: 'fixture-host',
+        acquiredAt: '2026-04-10T00:00:00.000Z',
+        expiresAt: '2026-04-10T00:05:00.000Z',
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--deep', '--fix', '--json']);
+  const doctorResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--deep',
+    '--fix',
+    '--json',
+  ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
-  assert.equal(doctorJson.result.actions.some((action) => action.id === 'clear_expired_lock'), true);
+  assert.equal(
+    doctorJson.result.actions.some(
+      (action) => action.id === 'clear_expired_lock',
+    ),
+    true,
+  );
   assert.equal(await pathExists(lockPath), false);
 });
 
@@ -662,10 +1065,17 @@ test('mwt doctor --deep --fix removes empty orphan sibling directories matching 
   const orphanDir = path.join(fixture.rootDir, 'repo-wt-orphan-empty-deadbeef');
   await mkdir(orphanDir, { recursive: true });
 
-  const doctorResult = await runCli(fixture.repoDir, ['doctor', '--deep', '--fix', '--json']);
+  const doctorResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--deep',
+    '--fix',
+    '--json',
+  ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(
-    doctorJson.result.actions.some((action) => action.id === 'remove_orphan_sibling_dir'),
+    doctorJson.result.actions.some(
+      (action) => action.id === 'remove_orphan_sibling_dir',
+    ),
     true,
   );
   assert.equal(await pathExists(orphanDir), false);
@@ -678,8 +1088,15 @@ test('pruneWorktrees continues other cleanup after one branch deletion fails', a
     remote: 'origin',
   });
 
-  const blocked = await createTaskWorktree(fixture.repoDir, 'prune-blocked-branch');
-  await writeFile(path.join(blocked.worktreePath, 'blocked.txt'), 'blocked\n', 'utf8');
+  const blocked = await createTaskWorktree(
+    fixture.repoDir,
+    'prune-blocked-branch',
+  );
+  await writeFile(
+    path.join(blocked.worktreePath, 'blocked.txt'),
+    'blocked\n',
+    'utf8',
+  );
   await runGit(blocked.worktreePath, ['add', 'blocked.txt']);
   await runGit(blocked.worktreePath, [
     '-c',
@@ -693,11 +1110,23 @@ test('pruneWorktrees continues other cleanup after one branch deletion fails', a
   await deliverTaskWorktree(blocked.worktreePath);
   await runGit(blocked.worktreePath, ['checkout', '--detach']);
 
-  const blockingWorktreePath = path.join(fixture.rootDir, 'blocking-branch-holder');
-  await runGit(fixture.repoDir, ['worktree', 'add', blockingWorktreePath, blocked.branch]);
+  const blockingWorktreePath = path.join(
+    fixture.rootDir,
+    'blocking-branch-holder',
+  );
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    blockingWorktreePath,
+    blocked.branch,
+  ]);
 
   const clean = await createTaskWorktree(fixture.repoDir, 'prune-clean-branch');
-  await writeFile(path.join(clean.worktreePath, 'clean.txt'), 'clean\n', 'utf8');
+  await writeFile(
+    path.join(clean.worktreePath, 'clean.txt'),
+    'clean\n',
+    'utf8',
+  );
   await runGit(clean.worktreePath, ['add', 'clean.txt']);
   await runGit(clean.worktreePath, [
     '-c',
@@ -725,13 +1154,26 @@ test('pruneWorktrees continues other cleanup after one branch deletion fails', a
   assert.equal(await pathExists(blocked.worktreePath), false);
   assert.equal(await pathExists(clean.worktreePath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 
-  const blockedBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', blocked.branch]);
-  assert.match(blockedBranchCheck.stdout, new RegExp(blocked.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  const blockedBranchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    blocked.branch,
+  ]);
+  assert.match(
+    blockedBranchCheck.stdout,
+    new RegExp(blocked.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+  );
 
-  const cleanBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', clean.branch]);
+  const cleanBranchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    clean.branch,
+  ]);
   assert.equal(cleanBranchCheck.stdout.trim(), '');
 });
 
@@ -743,7 +1185,11 @@ test('pruneWorktrees keeps state when path cleanup fails so regular doctor can f
   });
 
   const created = await createTaskWorktree(fixture.repoDir, 'prune-busy-path');
-  await writeFile(path.join(created.worktreePath, 'change.txt'), 'cleanup\n', 'utf8');
+  await writeFile(
+    path.join(created.worktreePath, 'change.txt'),
+    'cleanup\n',
+    'utf8',
+  );
   await runGit(created.worktreePath, ['add', 'change.txt']);
   await runGit(created.worktreePath, [
     '-c',
@@ -762,7 +1208,11 @@ test('pruneWorktrees keeps state when path cleanup fails so regular doctor can f
       merged: true,
       withBranches: true,
       removeWorktree: async (seedRoot, worktreePath) => {
-        const removeResult = await runGit(seedRoot, ['worktree', 'remove', worktreePath, '--force'], false);
+        const removeResult = await runGit(
+          seedRoot,
+          ['worktree', 'remove', worktreePath, '--force'],
+          false,
+        );
         if (removeResult.code === 0) {
           await mkdir(worktreePath, { recursive: true });
         }
@@ -770,7 +1220,9 @@ test('pruneWorktrees keeps state when path cleanup fails so regular doctor can f
       },
       removePath: async (targetPath) => {
         if (path.resolve(targetPath) === path.resolve(created.worktreePath)) {
-          const error = new Error(`EBUSY: resource busy or locked, rmdir '${targetPath}'`);
+          const error = new Error(
+            `EBUSY: resource busy or locked, rmdir '${targetPath}'`,
+          );
           error.code = 'EBUSY';
           throw error;
         }
@@ -790,28 +1242,36 @@ test('pruneWorktrees keeps state when path cleanup fails so regular doctor can f
       (failure) =>
         failure.worktreeId === created.worktreeId &&
         failure.stateRemoved === false &&
-        failure.failures.some((detail) => detail.step === 'remove_path')
+        failure.failures.some((detail) => detail.step === 'remove_path'),
     ),
     true,
   );
 
-  let state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  let state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 1);
   assert.equal(state.items[0].worktreeId, created.worktreeId);
 
-  const retryResult = await runCli(fixture.repoDir, ['doctor', '--fix', '--json']);
+  const retryResult = await runCli(fixture.repoDir, [
+    'doctor',
+    '--fix',
+    '--json',
+  ]);
   const retryJson = JSON.parse(retryResult.stdout);
   assert.equal(
     retryJson.result.actions.some(
       (action) =>
         action.id === 'remove_stale_registry_entry' &&
-        action.worktreeId === created.worktreeId
+        action.worktreeId === created.worktreeId,
     ),
     true,
   );
   assert.equal(await pathExists(created.worktreePath), false);
 
-  state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 });
 
@@ -819,34 +1279,59 @@ test('mwt create --dry-run returns a creation plan without mutating the reposito
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
 
-  const dryRunResult = await runCli(fixture.repoDir, ['create', 'preview-task', '--dry-run', '--json']);
+  const dryRunResult = await runCli(fixture.repoDir, [
+    'create',
+    'preview-task',
+    '--dry-run',
+    '--json',
+  ]);
   const dryRunJson = JSON.parse(dryRunResult.stdout);
   assert.equal(dryRunJson.result.dryRun, true);
-  assert.equal(dryRunJson.result.actions.some((action) => action.id === 'add_worktree'), true);
+  assert.equal(
+    dryRunJson.result.actions.some((action) => action.id === 'add_worktree'),
+    true,
+  );
   assert.equal(await pathExists(dryRunJson.result.worktreePath), false);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 0);
 });
 
 test('mwt drop --dry-run plans removal without mutating the repository', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-  const createResult = await runCli(fixture.repoDir, ['create', 'preview-drop', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'preview-drop',
+    '--json',
+  ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
 
-  const dryRunResult = await runCli(
-    fixture.repoDir,
-    ['drop', 'preview-drop', '--delete-branch', '--dry-run', '--json'],
-  );
+  const dryRunResult = await runCli(fixture.repoDir, [
+    'drop',
+    'preview-drop',
+    '--delete-branch',
+    '--dry-run',
+    '--json',
+  ]);
   const dryRunJson = JSON.parse(dryRunResult.stdout);
   assert.equal(dryRunJson.result.dryRun, true);
-  assert.equal(dryRunJson.result.actions.some((action) => action.id === 'drop_worktree'), true);
-  assert.equal(dryRunJson.result.actions.some((action) => action.id === 'drop_branch'), true);
+  assert.equal(
+    dryRunJson.result.actions.some((action) => action.id === 'drop_worktree'),
+    true,
+  );
+  assert.equal(
+    dryRunJson.result.actions.some((action) => action.id === 'drop_branch'),
+    true,
+  );
   assert.equal(await pathExists(taskPath), true);
 
-  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
   assert.equal(state.items.length, 1);
 });
 
@@ -856,15 +1341,38 @@ test('mwt create --run-bootstrap overrides a disabled bootstrap config', async (
 
   const configPath = path.join(fixture.repoDir, '.mwt', 'config.toml');
   const currentConfig = await readFile(configPath, 'utf8');
-  await writeFile(configPath, currentConfig.replace('enabled = true', 'enabled = false'), 'utf8');
+  await writeFile(
+    configPath,
+    currentConfig.replace('enabled = true', 'enabled = false'),
+    'utf8',
+  );
 
-  const withoutOverride = await runCli(fixture.repoDir, ['create', 'no-bootstrap-default', '--json']);
+  const withoutOverride = await runCli(fixture.repoDir, [
+    'create',
+    'no-bootstrap-default',
+    '--json',
+  ]);
   const withoutOverrideJson = JSON.parse(withoutOverride.stdout);
-  assert.equal(await pathExists(path.join(withoutOverrideJson.result.worktreePath, '.env.local')), false);
+  assert.equal(
+    await pathExists(
+      path.join(withoutOverrideJson.result.worktreePath, '.env.local'),
+    ),
+    false,
+  );
 
-  const withOverride = await runCli(fixture.repoDir, ['create', 'with-bootstrap', '--run-bootstrap', '--json']);
+  const withOverride = await runCli(fixture.repoDir, [
+    'create',
+    'with-bootstrap',
+    '--run-bootstrap',
+    '--json',
+  ]);
   const withOverrideJson = JSON.parse(withOverride.stdout);
-  assert.equal(await pathExists(path.join(withOverrideJson.result.worktreePath, '.env.local')), true);
+  assert.equal(
+    await pathExists(
+      path.join(withOverrideJson.result.worktreePath, '.env.local'),
+    ),
+    true,
+  );
 });
 
 test('mwt list hides external worktrees by default and includes them with --all', async () => {
@@ -872,13 +1380,30 @@ test('mwt list hides external worktrees by default and includes them with --all'
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
 
   const externalPath = path.join(fixture.rootDir, 'external-worktree');
-  await runGit(fixture.repoDir, ['worktree', 'add', externalPath, '-b', 'external-branch', 'origin/main']);
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    externalPath,
+    '-b',
+    'external-branch',
+    'origin/main',
+  ]);
 
-  const defaultList = JSON.parse((await runCli(fixture.repoDir, ['list', '--json'])).stdout);
-  assert.equal(defaultList.result.items.some((item) => item.kind === 'external'), false);
+  const defaultList = JSON.parse(
+    (await runCli(fixture.repoDir, ['list', '--json'])).stdout,
+  );
+  assert.equal(
+    defaultList.result.items.some((item) => item.kind === 'external'),
+    false,
+  );
 
-  const allList = JSON.parse((await runCli(fixture.repoDir, ['list', '--all', '--json'])).stdout);
-  assert.equal(allList.result.items.some((item) => item.kind === 'external'), true);
+  const allList = JSON.parse(
+    (await runCli(fixture.repoDir, ['list', '--all', '--json'])).stdout,
+  );
+  assert.equal(
+    allList.result.items.some((item) => item.kind === 'external'),
+    true,
+  );
 });
 
 test('mwt blocks concurrent state-changing operations with a repository lock', async () => {
@@ -886,16 +1411,24 @@ test('mwt blocks concurrent state-changing operations with a repository lock', a
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
 
   const hookPath = path.join(fixture.repoDir, '.mwt', 'hooks', 'hold-lock.cjs');
-  await writeFile(hookPath, [
-    "const fs = require('node:fs');",
-    "fs.writeFileSync(process.env.MWT_LOCK_READY, 'ready');",
-    'const deadline = Date.now() + 10000;',
-    'while (!fs.existsSync(process.env.MWT_RELEASE_FILE) && Date.now() < deadline) {}',
-  ].join('\n'), 'utf8');
+  await writeFile(
+    hookPath,
+    [
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.env.MWT_LOCK_READY, 'ready');",
+      'const deadline = Date.now() + 10000;',
+      'while (!fs.existsSync(process.env.MWT_RELEASE_FILE) && Date.now() < deadline) {}',
+    ].join('\n'),
+    'utf8',
+  );
 
   const configPath = path.join(fixture.repoDir, '.mwt', 'config.toml');
   const currentConfig = await readFile(configPath, 'utf8');
-  await writeFile(configPath, `${currentConfig}\n[hooks.pre_create]\nhold_lock = "node .mwt/hooks/hold-lock.cjs"\n`, 'utf8');
+  await writeFile(
+    configPath,
+    `${currentConfig}\n[hooks.pre_create]\nhold_lock = "node .mwt/hooks/hold-lock.cjs"\n`,
+    'utf8',
+  );
 
   const readyPath = path.join(fixture.rootDir, 'lock-ready.txt');
   const releasePath = path.join(fixture.rootDir, 'lock-release.txt');
@@ -905,10 +1438,14 @@ test('mwt blocks concurrent state-changing operations with a repository lock', a
     MWT_RELEASE_FILE: releasePath,
   };
 
-  const firstCreate = run(process.execPath, [cliPath, 'create', 'locked-first', '--yes', '--json'], {
-    cwd: fixture.repoDir,
-    env,
-  });
+  const firstCreate = run(
+    process.execPath,
+    [cliPath, 'create', 'locked-first', '--yes', '--json'],
+    {
+      cwd: fixture.repoDir,
+      env,
+    },
+  );
   await waitForPath(readyPath);
 
   const secondCreate = await runCli(

@@ -561,11 +561,12 @@ Behavior:
 5. Refuse creation if the target path is occupied by a non-managed directory.
 6. Create branch from `origin/<base>`.
 7. Add sibling worktree.
-8. Write task marker.
-9. Run `pre_create`.
-10. Copy bootstrap files if enabled.
-11. Run `post_create`.
-12. Register the worktree in `worktrees.json`.
+8. Initialize Git submodules in the new worktree when `.gitmodules` exists.
+9. Write task marker.
+10. Run `pre_create`.
+11. Copy bootstrap files if enabled.
+12. Run `post_create`.
+13. Register the worktree in `worktrees.json`.
 
 ### `mwt list`
 
