@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.2.7 - 2026-04-15
+
+- Retry Windows worktree-directory removal when transient `EBUSY`, `EPERM`, or
+  `ENOTEMPTY` cleanup races occur, so `mwt doctor --fix`, `mwt doctor --deep
+  --fix`, and related cleanup flows can usually finish without leaving behind
+  empty orphan directories.
+- Keep stale registry entries when a cleanup path still exists after retries are
+  exhausted, so a normal later `mwt doctor --fix` run can see and finish the
+  recovery instead of degrading the residue into a deep-only orphan sibling.
+- Add regression coverage for retrying transient Windows cleanup races and for
+  preserving recoverable state when prune/doctor path deletion still fails.
+
 ## 2.2.6 - 2026-04-15
 
 - Make `mwt doctor --fix` and `mwt doctor --deep --fix` continue later safe
