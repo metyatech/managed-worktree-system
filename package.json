@@ -1,6 +1,6 @@
 {
   "name": "@metyatech/managed-worktree-system",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "type": "module",
   "description": "Managed Git worktree CLI for parallel human and AI task work with a clean seed checkout.",
   "license": "MIT",

@@ -987,6 +987,11 @@ function pushCleanupFailure(failures, step, error, extra = {}) {
   });
 }
 
+function recordCleanupAction(actions, completedSteps, action, summary) {
+  actions.push(action);
+  completedSteps.push(summary);
+}
+
 async function isLiveGitWorktree(seedRoot, worktreePath) {
   const listed = await worktreeList(seedRoot);
   return listed
@@ -1856,6 +1861,28 @@ async function removeEmptyDirectoryIfPresent(targetPath) {
   return !(await pathExists(targetPath));
 }
 
+function throwDoctorFixIncomplete({
+  issues,
+  appliedActions,
+  completedSteps,
+  failures,
+}) {
+  throw new MwtError({
+    code: EXIT_CODES.GENERIC_FAILURE,
+    id: 'doctor_fix_incomplete',
+    message:
+      'Doctor repaired some managed-worktree state but could not finish every requested fix.',
+    details: {
+      issues,
+      appliedActions,
+      completedSteps,
+      failures,
+      recovery:
+        'Resolve the blocking cleanup failure, then rerun mwt doctor --fix or mwt doctor --deep --fix.',
+    },
+  });
+}
+
 async function assessDoctorRepository(seedRoot, options = {}) {
   const managedPaths = getManagedPaths(seedRoot);
   if (!(await pathExists(managedPaths.configPath)) || !(await pathExists(managedPaths.markerPath))) {
@@ -1873,6 +1900,9 @@ async function assessDoctorRepository(seedRoot, options = {}) {
   const listedPaths = new Set(listed.map((entry) => path.resolve(entry.path)));
   const nextItems = [];
   const config = options.fix ? await loadConfig(seedRoot) : null;
+  const completedSteps = [];
+  const failures = [];
+  const pendingStateActions = [];
 
   for (const item of state.items) {
     if (!listedPaths.has(path.resolve(item.path))) {
@@ -1884,11 +1914,25 @@ async function assessDoctorRepository(seedRoot, options = {}) {
       });
 
       if (options.fix) {
-        if (await removeEmptyDirectoryIfPresent(item.path)) {
-          actions.push({
-            id: 'remove_empty_stale_worktree_dir',
-            path: toPortablePath(item.path),
-          });
+        try {
+          if (await removeEmptyDirectoryIfPresent(item.path)) {
+            recordCleanupAction(
+              actions,
+              completedSteps,
+              {
+                id: 'remove_empty_stale_worktree_dir',
+                path: toPortablePath(item.path),
+              },
+              `remove_empty_stale_worktree_dir: ${toPortablePath(item.path)}`
+            );
+          }
+        } catch (error) {
+          pushCleanupFailure(
+            failures,
+            'remove_empty_stale_worktree_dir',
+            error,
+            { path: toPortablePath(item.path) }
+          );
         }
         if (config && item.branch) {
           const divergence = await getAheadBehind(
@@ -1898,15 +1942,27 @@ async function assessDoctorRepository(seedRoot, options = {}) {
           );
           if (divergence && divergence.ahead === 0) {
             const deleteResult = await deleteBranch(seedRoot, item.branch, true);
-            if (deleteResult.code === 0) {
-              actions.push({
-                id: 'delete_stale_branch',
+            const branchDeleted =
+              deleteResult.code === 0 ||
+              !(await branchExists(seedRoot, item.branch));
+            if (branchDeleted) {
+              recordCleanupAction(
+                actions,
+                completedSteps,
+                {
+                  id: 'delete_stale_branch',
+                  branch: item.branch,
+                },
+                `delete_stale_branch: ${item.branch}`
+              );
+            } else {
+              pushCleanupFailure(failures, 'delete_stale_branch', deleteResult, {
                 branch: item.branch,
               });
             }
           }
         }
-        actions.push({
+        pendingStateActions.push({
           id: 'remove_stale_registry_entry',
           worktreeId: item.worktreeId,
         });
@@ -1935,7 +1991,7 @@ async function assessDoctorRepository(seedRoot, options = {}) {
           path: marker.worktreePath,
           status: 'active',
         });
-        actions.push({
+        pendingStateActions.push({
           id: 'add_missing_registry_entry',
           worktreeId: marker.worktreeId,
         });
@@ -1987,40 +2043,111 @@ async function assessDoctorRepository(seedRoot, options = {}) {
         },
       });
 
-      if (options.fix && await removeEmptyDirectoryIfPresent(siblingDir)) {
-        actions.push({
-          id: 'remove_orphan_sibling_dir',
-          path: toPortablePath(siblingDir),
-        });
+      if (options.fix) {
+        try {
+          if (await removeEmptyDirectoryIfPresent(siblingDir)) {
+            recordCleanupAction(
+              actions,
+              completedSteps,
+              {
+                id: 'remove_orphan_sibling_dir',
+                path: toPortablePath(siblingDir),
+              },
+              `remove_orphan_sibling_dir: ${toPortablePath(siblingDir)}`
+            );
+          }
+        } catch (error) {
+          pushCleanupFailure(
+            failures,
+            'remove_orphan_sibling_dir',
+            error,
+            { path: toPortablePath(siblingDir) }
+          );
+        }
       }
     }
   }
 
   if (options.fix) {
     nextItems.sort((left, right) => left.name.localeCompare(right.name));
-    await writeWorktreeState(seedRoot, {
-      version: TOOL_STATE_VERSION,
-      items: nextItems,
-    });
+    try {
+      await writeWorktreeState(seedRoot, {
+        version: TOOL_STATE_VERSION,
+        items: nextItems,
+      });
+      for (const action of pendingStateActions) {
+        const summary =
+          action.id === 'remove_stale_registry_entry'
+            ? `remove_stale_registry_entry: ${action.worktreeId}`
+            : `add_missing_registry_entry: ${action.worktreeId}`;
+        recordCleanupAction(actions, completedSteps, action, summary);
+      }
+    } catch (error) {
+      pushCleanupFailure(
+        failures,
+        'write_worktree_state',
+        error,
+        { path: toPortablePath(managedPaths.worktreeStatePath) }
+      );
+    }
 
     if (!(await pathExists(managedPaths.seedStatePath))) {
-      const config = await loadConfig(seedRoot);
-      await writeSeedState(seedRoot, {
-        branch: await getCurrentBranch(seedRoot),
-        remote: config.default_remote,
-        lastSyncAt: null,
-        lastSyncCommit: await getHeadCommit(seedRoot),
-        status: 'healthy',
-      });
-      actions.push({ id: 'rebuild_seed_state' });
+      try {
+        const config = await loadConfig(seedRoot);
+        await writeSeedState(seedRoot, {
+          branch: await getCurrentBranch(seedRoot),
+          remote: config.default_remote,
+          lastSyncAt: null,
+          lastSyncCommit: await getHeadCommit(seedRoot),
+          status: 'healthy',
+        });
+        recordCleanupAction(
+          actions,
+          completedSteps,
+          { id: 'rebuild_seed_state' },
+          'rebuild_seed_state'
+        );
+      } catch (error) {
+        pushCleanupFailure(
+          failures,
+          'rebuild_seed_state',
+          error,
+          { path: toPortablePath(managedPaths.seedStatePath) }
+        );
+      }
     }
 
     if (options.deep) {
-      const clearedLocks = await clearExpiredLocks(seedRoot);
-      actions.push(...clearedLocks.map((scope) => ({
-        id: 'clear_expired_lock',
-        scope,
-      })));
+      try {
+        const clearedLocks = await clearExpiredLocks(seedRoot);
+        for (const scope of clearedLocks) {
+          recordCleanupAction(
+            actions,
+            completedSteps,
+            {
+              id: 'clear_expired_lock',
+              scope,
+            },
+            `clear_expired_lock: ${scope}`
+          );
+        }
+      } catch (error) {
+        pushCleanupFailure(
+          failures,
+          'clear_expired_lock',
+          error,
+          { path: toPortablePath(managedPaths.locksDir) }
+        );
+      }
+    }
+
+    if (failures.length > 0) {
+      throwDoctorFixIncomplete({
+        issues,
+        appliedActions: actions,
+        completedSteps,
+        failures,
+      });
     }
   }
 

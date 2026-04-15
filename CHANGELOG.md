@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.2.6 - 2026-04-15
+
+- Make `mwt doctor --fix` and `mwt doctor --deep --fix` continue later safe
+  repairs after one cleanup step fails, then return a structured
+  `doctor_fix_incomplete` error that reports both the fixes already applied and
+  the cleanup failures that remain.
+- Add regression coverage for partial doctor cleanup failures so stale
+  directory, branch, and registry repair keeps progressing even when one stale
+  branch still cannot be deleted.
+
 ## 2.2.5 - 2026-04-15
 
 - Make `mwt drop` finish safe follow-on cleanup steps even when a later branch

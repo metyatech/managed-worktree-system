@@ -7,6 +7,7 @@ import { pathExists } from '../src/lib/fs.mjs';
 import { MWT_MARKER_FILE } from '../src/lib/constants.mjs';
 import {
   createTaskWorktree,
+  doctorRepository,
   deliverTaskWorktree,
   dropTaskWorktree,
   initializeRepository,
@@ -455,6 +456,81 @@ test('mwt doctor --fix keeps a stale branch when it still has unique commits', a
 
   const branchCheck = await runGit(fixture.repoDir, ['branch', '--list', taskBranch]);
   assert.match(branchCheck.stdout, new RegExp(taskBranch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+});
+
+test('doctorRepository reports structured incomplete fix details and continues other stale repairs', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const blocked = await createTaskWorktree(fixture.repoDir, 'doctor-blocked-branch');
+  const clean = await createTaskWorktree(fixture.repoDir, 'doctor-clean-branch');
+
+  await runGit(fixture.repoDir, ['worktree', 'remove', blocked.worktreePath, '--force']);
+  await runGit(fixture.repoDir, ['worktree', 'remove', clean.worktreePath, '--force']);
+  await mkdir(blocked.worktreePath, { recursive: true });
+  await mkdir(clean.worktreePath, { recursive: true });
+
+  const blockingWorktreePath = path.join(fixture.rootDir, 'doctor-blocking-branch-holder');
+  await runGit(fixture.repoDir, ['worktree', 'add', blockingWorktreePath, blocked.branch]);
+
+  let caught = null;
+  try {
+    await doctorRepository(fixture.repoDir, {
+      fix: true,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught, 'doctorRepository should report incomplete cleanup details');
+  assert.equal(caught.id, 'doctor_fix_incomplete');
+  assert.equal(await pathExists(blocked.worktreePath), false);
+  assert.equal(await pathExists(clean.worktreePath), false);
+
+  const state = await readJson(path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'));
+  assert.equal(state.items.length, 0);
+
+  const blockedBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', blocked.branch]);
+  assert.match(blockedBranchCheck.stdout, new RegExp(blocked.branch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+
+  const cleanBranchCheck = await runGit(fixture.repoDir, ['branch', '--list', clean.branch]);
+  assert.equal(cleanBranchCheck.stdout.trim(), '');
+
+  assert.equal(
+    caught.details.appliedActions.some(
+      (action) =>
+        action.id === 'remove_stale_registry_entry' &&
+        action.worktreeId === blocked.worktreeId
+    ),
+    true,
+  );
+  assert.equal(
+    caught.details.appliedActions.some(
+      (action) =>
+        action.id === 'remove_stale_registry_entry' &&
+        action.worktreeId === clean.worktreeId
+    ),
+    true,
+  );
+  assert.equal(
+    caught.details.appliedActions.some(
+      (action) =>
+        action.id === 'delete_stale_branch' &&
+        action.branch === clean.branch
+    ),
+    true,
+  );
+  assert.equal(
+    caught.details.failures.some(
+      (failure) =>
+        failure.step === 'delete_stale_branch' &&
+        failure.branch === blocked.branch
+    ),
+    true,
+  );
 });
 
 test('mwt doctor --deep --fix clears expired lock files', async () => {

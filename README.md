@@ -301,7 +301,9 @@ Parameters:
 
 - `--fix`: repair missing or stale registry entries when possible, remove empty
   stale worktree directories, and delete stale local task branches that no
-  longer contain unique commits.
+  longer contain unique commits. If one cleanup step still fails, doctor keeps
+  any other safe repairs, then returns a structured incomplete-cleanup error so
+  callers can show both the fixes that succeeded and the failures that remain.
 - `--deep`: include lock files, orphan sibling directories, and seed topology checks.
 
 With `--deep --fix`, `mwt doctor` also removes empty orphan sibling directories
