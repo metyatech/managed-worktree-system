@@ -993,50 +993,58 @@ export async function planDeliverTaskWorktree(taskRoot, options = {}) {
 
   const targetBranch =
     options.target ?? marker.targetBranch ?? config.default_branch;
+  const verifySkipped = Boolean(options.skipVerify);
+  const actions = [
+    {
+      id: 'mark_delivering',
+      description: 'Set runtime state to delivering.',
+    },
+    {
+      id: 'fetch_target',
+      description: `Fetch ${config.default_remote}/${targetBranch}.`,
+    },
+    {
+      id: 'rebase_task',
+      description: `Rebase the task branch onto ${config.default_remote}/${targetBranch}.`,
+    },
+    {
+      id: 'run_pre_deliver_hooks',
+      description: 'Run blocking pre_deliver hooks.',
+    },
+    ...(verifySkipped
+      ? []
+      : [
+          {
+            id: 'run_verify',
+            description: `Run ${config.verify?.command ?? 'the configured verify command'}.`,
+          },
+        ]),
+    {
+      id: 'push_target',
+      description: `Push HEAD to ${config.default_remote}:${targetBranch}.`,
+    },
+    {
+      id: 'sync_seed',
+      description: `Fast-forward the seed worktree to ${config.default_remote}/${targetBranch}.`,
+    },
+    { id: 'run_post_deliver_hooks', description: 'Run post_deliver hooks.' },
+    {
+      id: 'mark_delivered',
+      description:
+        'Persist last-deliver.json and mark the task as delivered.',
+    },
+  ];
+
   return {
     dryRun: true,
     worktreeId: marker.worktreeId,
     worktreeName: marker.worktreeName,
     taskPath: marker.worktreePath,
     targetBranch,
-    verifyCommand: config.verify?.command ?? null,
+    verifyCommand: verifySkipped ? null : (config.verify?.command ?? null),
+    verifySkipped,
     currentStatus: item?.status ?? 'active',
-    actions: [
-      {
-        id: 'mark_delivering',
-        description: 'Set runtime state to delivering.',
-      },
-      {
-        id: 'fetch_target',
-        description: `Fetch ${config.default_remote}/${targetBranch}.`,
-      },
-      {
-        id: 'rebase_task',
-        description: `Rebase the task branch onto ${config.default_remote}/${targetBranch}.`,
-      },
-      {
-        id: 'run_pre_deliver_hooks',
-        description: 'Run blocking pre_deliver hooks.',
-      },
-      {
-        id: 'run_verify',
-        description: `Run ${config.verify?.command ?? 'the configured verify command'}.`,
-      },
-      {
-        id: 'push_target',
-        description: `Push HEAD to ${config.default_remote}:${targetBranch}.`,
-      },
-      {
-        id: 'sync_seed',
-        description: `Fast-forward the seed worktree to ${config.default_remote}/${targetBranch}.`,
-      },
-      { id: 'run_post_deliver_hooks', description: 'Run post_deliver hooks.' },
-      {
-        id: 'mark_delivered',
-        description:
-          'Persist last-deliver.json and mark the task as delivered.',
-      },
-    ],
+    actions,
   };
 }
 
@@ -1661,33 +1669,36 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
     },
   );
 
-  if (!config.verify?.command) {
-    throw new MwtError({
-      code: EXIT_CODES.VERIFICATION_FAILURE,
-      id: 'missing_verify_command',
-      message: 'No verify.command is configured for delivery.',
-    });
-  }
+  const verifySkipped = Boolean(options.skipVerify);
+  if (!verifySkipped) {
+    if (!config.verify?.command) {
+      throw new MwtError({
+        code: EXIT_CODES.VERIFICATION_FAILURE,
+        id: 'missing_verify_command',
+        message: 'No verify.command is configured for delivery.',
+      });
+    }
 
-  const verifyResult = await runShell(config.verify.command, { cwd: taskRoot });
-  if (verifyResult.code !== 0) {
-    await updateWorktreeStatus(seedRoot, marker.worktreeId, 'active');
-    await writeLastDeliverState(seedRoot, {
-      worktreeId: marker.worktreeId,
-      status: 'verification-failed',
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      targetBranch,
-    });
-    throw new MwtError({
-      code: EXIT_CODES.VERIFICATION_FAILURE,
-      id: 'deliver_verify_failed',
-      message: 'Verification failed during deliver.',
-      details: {
-        stdout: verifyResult.stdout.trim(),
-        stderr: verifyResult.stderr.trim(),
-      },
-    });
+    const verifyResult = await runShell(config.verify.command, { cwd: taskRoot });
+    if (verifyResult.code !== 0) {
+      await updateWorktreeStatus(seedRoot, marker.worktreeId, 'active');
+      await writeLastDeliverState(seedRoot, {
+        worktreeId: marker.worktreeId,
+        status: 'verification-failed',
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        targetBranch,
+      });
+      throw new MwtError({
+        code: EXIT_CODES.VERIFICATION_FAILURE,
+        id: 'deliver_verify_failed',
+        message: 'Verification failed during deliver.',
+        details: {
+          stdout: verifyResult.stdout.trim(),
+          stderr: verifyResult.stderr.trim(),
+        },
+      });
+    }
   }
 
   const pushResult = await pushHeadToBranch(taskRoot, remote, targetBranch);
@@ -1739,6 +1750,7 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
     targetBranch,
     pushedCommit,
     seedSyncedTo: seedSync.after,
+    verifySkipped,
   };
 }
 

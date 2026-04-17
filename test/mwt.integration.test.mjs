@@ -442,6 +442,86 @@ test('mwt deliver pushes committed task changes and prune removes delivered work
   assert.equal(state.items.length, 0);
 });
 
+test('mwt deliver --skip-verify skips verification and still pushes', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'fast-ship',
+    '--json',
+  ]);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+
+  await writeFile(path.join(taskPath, 'README.md'), '# Fast\n', 'utf8');
+  await runGit(taskPath, ['add', 'README.md']);
+  await runGit(taskPath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'fast task change',
+  ]);
+
+  const deliverResult = await runCli(fixture.repoDir, [
+    'deliver',
+    'fast-ship',
+    '--skip-verify',
+    '--json',
+  ]);
+  const deliverJson = JSON.parse(deliverResult.stdout);
+  assert.equal(deliverJson.ok, true);
+  assert.equal(deliverJson.result.verifySkipped, true);
+
+  const seedReadme = await readFile(
+    path.join(fixture.repoDir, 'README.md'),
+    'utf8',
+  );
+  assert.equal(seedReadme, '# Fast\n');
+});
+
+test('mwt deliver --skip-verify still delivers even when no verify command is configured', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+
+  const configPath = path.join(fixture.repoDir, '.mwt', 'config.toml');
+  const configContent = await readFile(configPath, 'utf8');
+  const stripped = configContent.replace(/\[verify\][\s\S]*?(?=\n\[|$)/u, '');
+  await writeFile(configPath, stripped, 'utf8');
+
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'no-verify-cfg',
+    '--json',
+  ]);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+
+  await writeFile(path.join(taskPath, 'README.md'), '# NoVerify\n', 'utf8');
+  await runGit(taskPath, ['add', 'README.md']);
+  await runGit(taskPath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'no verify config change',
+  ]);
+
+  const deliverResult = await runCli(fixture.repoDir, [
+    'deliver',
+    'no-verify-cfg',
+    '--skip-verify',
+    '--json',
+  ]);
+  const deliverJson = JSON.parse(deliverResult.stdout);
+  assert.equal(deliverJson.ok, true);
+  assert.equal(deliverJson.result.verifySkipped, true);
+});
+
 test('mwt drop removes an active task worktree and deletes its branch', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);

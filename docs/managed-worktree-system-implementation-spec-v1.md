@@ -151,6 +151,7 @@ All commands SHOULD support:
 #### `mwt deliver`
 
 - `--target <branch>`
+- `--skip-verify` — skip the configured verify command during delivery
 - `--allow-dirty-task`
 - `--resume`
 
@@ -594,7 +595,7 @@ Behavior:
 4. Rebase task branch onto `origin/<target>`.
 5. If rebase conflicts, set status `conflict`, persist `last-deliver.json`, and exit `8`.
 6. Run `pre_deliver`.
-7. Run verify command from config.
+7. Unless `--skip-verify` is passed, run verify command from config.
 8. If verify fails, persist failure and exit `7`.
 9. Push `HEAD:<target>` to the configured remote.
 10. If push is rejected, persist failure and exit `9`.

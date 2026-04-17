@@ -60,8 +60,9 @@ Example: mwt create feature-auth --base main --json
   list: `Usage: mwt list [--all] [--kind <seed|task>] [--status <status>] [--json]
 Example: mwt list --kind task --status active --json
 `,
-  deliver: `Usage: mwt deliver [<name>] [--target <branch>] [--allow-dirty-task] [--resume] [--json]
+  deliver: `Usage: mwt deliver [<name>] [--target <branch>] [--skip-verify] [--allow-dirty-task] [--resume] [--json]
 Example: mwt deliver feature-auth --target main --json
+Example: mwt deliver feature-auth --skip-verify --json
 `,
   sync: `Usage: mwt sync [--base <branch>] [--json]
 Example: mwt sync --base main --json
@@ -202,6 +203,7 @@ function parseCommandOptions(command, args) {
     deliver: {
       ...shared,
       target: { type: 'string' },
+      'skip-verify': { type: 'boolean' },
       'allow-dirty-task': { type: 'boolean' },
       resume: { type: 'boolean' },
     },
@@ -391,6 +393,7 @@ async function runCommand(command, parsed) {
           result: {
             ...(await planDeliverTaskWorktree(taskRoot, {
               target: values.target,
+              skipVerify: values['skip-verify'],
               allowDirtyTask: values['allow-dirty-task'],
               resume: values.resume,
             })),
@@ -534,6 +537,7 @@ async function runCommand(command, parsed) {
 
       const result = await runWithRepoLock(() => deliverTaskWorktree(taskRoot, {
         target: values.target,
+        skipVerify: values['skip-verify'],
         allowDirtyTask: values['allow-dirty-task'],
         resume: values.resume,
         yes: values.yes,

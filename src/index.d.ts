@@ -52,6 +52,7 @@ export interface CreateTaskWorktreeResult {
 
 export interface DeliverTaskWorktreeOptions {
   target?: string;
+  skipVerify?: boolean;
   allowDirtyTask?: boolean;
   resume?: boolean;
   yes?: boolean;
@@ -62,6 +63,7 @@ export interface DeliverTaskWorktreeResult {
   targetBranch: string;
   pushedCommit: string;
   seedSyncedTo: string;
+  verifySkipped: boolean;
 }
 
 export interface DropTaskWorktreeOptions {

@@ -227,6 +227,7 @@ Parameters:
 
 - `<name>`: task worktree name or worktree id. If omitted, the current task worktree is used.
 - `--target <branch>`: override the configured delivery target branch.
+- `--skip-verify`: skip the configured verify command during delivery. Use when verification was already run before committing.
 - `--allow-dirty-task`: skip the pre-deliver tracked-clean task check.
 - `--resume`: rerun delivery after a previously recorded conflict or interruption.
 
@@ -234,6 +235,7 @@ Example:
 
 ```powershell
 mwt deliver feature-auth --target main --json
+mwt deliver feature-auth --skip-verify --json
 ```
 
 #### `mwt sync`
