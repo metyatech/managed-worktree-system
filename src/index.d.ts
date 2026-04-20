@@ -31,6 +31,7 @@ export interface CreateTaskWorktreeOptions {
   target?: string;
   bootstrap?: boolean;
   copyProfile?: string;
+  allowDirtySeed?: boolean;
   yes?: boolean;
   createdBy?: string;
   pathTemplate?: string;
@@ -54,8 +55,14 @@ export interface DeliverTaskWorktreeOptions {
   target?: string;
   skipVerify?: boolean;
   allowDirtyTask?: boolean;
+  allowDirtySeed?: boolean;
   resume?: boolean;
   yes?: boolean;
+}
+
+export interface SyncSeedOptions {
+  base?: string;
+  allowDirtySeed?: boolean;
 }
 
 export interface DeliverTaskWorktreeResult {
@@ -126,21 +133,75 @@ export declare function detectContext(cwd?: string): Promise<{
   marker: MwtMarker | null;
   seedRoot: string;
 }>;
-export declare function loadConfig(seedRoot: string): Promise<Record<string, unknown>>;
-export declare function loadMarker(worktreeRoot: string): Promise<MwtMarker | null>;
-export declare function initializeRepository(seedRoot: string, options?: Record<string, unknown>): Promise<InitResult>;
-export declare function createTaskWorktree(seedRoot: string, taskName: string, options?: CreateTaskWorktreeOptions): Promise<CreateTaskWorktreeResult>;
-export declare function deliverTaskWorktree(taskRoot: string, options?: DeliverTaskWorktreeOptions): Promise<DeliverTaskWorktreeResult>;
-export declare function dropTaskWorktree(taskRoot: string, options?: DropTaskWorktreeOptions): Promise<DropTaskWorktreeResult>;
-export declare function findTaskByName(seedRoot: string, name: string): Promise<FindTaskResult>;
-export declare function listWorktrees(seedRoot: string, options?: Record<string, unknown>): Promise<WorktreeListItem[]>;
-export declare function syncSeed(seedRoot: string, options?: Record<string, unknown>): Promise<SyncSeedResult>;
-export declare function pruneWorktrees(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function doctorRepository(seedRoot: string, options?: Record<string, unknown>): Promise<DoctorResult>;
-export declare function planInitializeRepository(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function planCreateTaskWorktree(seedRoot: string, taskName: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function planDeliverTaskWorktree(taskRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function planDropTaskWorktree(taskRoot: string, options?: DropTaskWorktreeOptions): Promise<Record<string, unknown>>;
-export declare function planPruneWorktrees(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function planDoctorRepository(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export declare function planSyncSeed(seedRoot: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function loadConfig(
+  seedRoot: string,
+): Promise<Record<string, unknown>>;
+export declare function loadMarker(
+  worktreeRoot: string,
+): Promise<MwtMarker | null>;
+export declare function initializeRepository(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<InitResult>;
+export declare function createTaskWorktree(
+  seedRoot: string,
+  taskName: string,
+  options?: CreateTaskWorktreeOptions,
+): Promise<CreateTaskWorktreeResult>;
+export declare function deliverTaskWorktree(
+  taskRoot: string,
+  options?: DeliverTaskWorktreeOptions,
+): Promise<DeliverTaskWorktreeResult>;
+export declare function dropTaskWorktree(
+  taskRoot: string,
+  options?: DropTaskWorktreeOptions,
+): Promise<DropTaskWorktreeResult>;
+export declare function findTaskByName(
+  seedRoot: string,
+  name: string,
+): Promise<FindTaskResult>;
+export declare function listWorktrees(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<WorktreeListItem[]>;
+export declare function syncSeed(
+  seedRoot: string,
+  options?: SyncSeedOptions,
+): Promise<SyncSeedResult>;
+export declare function pruneWorktrees(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<Record<string, unknown>>;
+export declare function doctorRepository(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<DoctorResult>;
+export declare function planInitializeRepository(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<Record<string, unknown>>;
+export declare function planCreateTaskWorktree(
+  seedRoot: string,
+  taskName: string,
+  options?: CreateTaskWorktreeOptions,
+): Promise<Record<string, unknown>>;
+export declare function planDeliverTaskWorktree(
+  taskRoot: string,
+  options?: DeliverTaskWorktreeOptions,
+): Promise<Record<string, unknown>>;
+export declare function planDropTaskWorktree(
+  taskRoot: string,
+  options?: DropTaskWorktreeOptions,
+): Promise<Record<string, unknown>>;
+export declare function planPruneWorktrees(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<Record<string, unknown>>;
+export declare function planDoctorRepository(
+  seedRoot: string,
+  options?: Record<string, unknown>,
+): Promise<Record<string, unknown>>;
+export declare function planSyncSeed(
+  seedRoot: string,
+  options?: SyncSeedOptions,
+): Promise<Record<string, unknown>>;
