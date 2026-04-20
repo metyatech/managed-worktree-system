@@ -78,7 +78,7 @@ v1 MUST satisfy these invariants:
 - one seed worktree: repository root
 - all tracked edits happen only in task worktrees
 - task worktrees are siblings of the seed worktree
-- seed worktree tracked changes block `create`, `deliver`, and `sync`
+- seed worktree tracked changes block `create`, `deliver`, and `sync` unless `--allow-dirty-seed` is supplied; the flag disables the precondition check only — later Git steps such as fast-forward or worktree update can still fail when tracked edits overlap
 - task delivery rebases onto the remote target, verifies, pushes, then fast-forwards the seed
 - cleanup deletes only managed task worktrees, never the seed worktree
 - all state-changing commands support `--json`, `--dry-run`, and non-interactive operation
@@ -139,6 +139,7 @@ All commands SHOULD support:
 - `--copy-profile <profile>`
 - `--run-bootstrap`
 - `--no-bootstrap`
+- `--allow-dirty-seed`
 
 `<name>` and `--name` are aliases; one of them is required.
 
@@ -153,6 +154,7 @@ All commands SHOULD support:
 - `--target <branch>`
 - `--skip-verify` — skip the configured verify command during delivery
 - `--allow-dirty-task`
+- `--allow-dirty-seed`
 - `--resume`
 
 If `<name>` is omitted, `deliver` operates on the current worktree.
@@ -160,6 +162,7 @@ If `<name>` is omitted, `deliver` operates on the current worktree.
 #### `mwt sync`
 
 - `--base <branch>`
+- `--allow-dirty-seed`
 
 #### `mwt drop`
 
@@ -239,7 +242,7 @@ Error responses use the same envelope:
     "message": "Seed worktree has tracked changes and cannot be synchronized.",
     "details": {
       "changedFiles": ["README.md"],
-      "recovery": "Move tracked edits into a task worktree or discard them, then rerun mwt sync."
+      "recovery": "Move tracked edits into a task worktree or discard them, rerun the command, or use --allow-dirty-seed when you intentionally want to bypass the clean-seed policy guard."
     }
   }
 }
@@ -692,6 +695,7 @@ Return exit code `4` with a recovery message:
 - move tracked changes into a task worktree
 - commit or discard them
 - rerun the blocked command
+- or pass `--allow-dirty-seed` to bypass the clean-seed precondition check; note that later Git steps such as fast-forward or worktree update can still fail when tracked edits overlap
 
 ### Rebase conflict
 

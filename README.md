@@ -91,6 +91,7 @@ Programmatic create options:
 - `target`: override the configured target branch recorded in task metadata.
 - `bootstrap`: force or skip bootstrap copying.
 - `copyProfile`: choose a bootstrap profile from `.mwt/config.toml`.
+- `allowDirtySeed`: skip the pre-create tracked-clean seed check. This bypasses the precondition only; later Git steps can still fail when tracked edits overlap.
 - `createdBy`: record the logical creator in `.mwt-worktree.json`.
 - `pathTemplate`: override the configured task worktree path template for this
   call.
@@ -100,6 +101,7 @@ Programmatic delivery options:
 
 - `target`: override the delivery target branch for this call.
 - `allowDirtyTask`: skip the tracked-clean guard inside the task worktree.
+- `allowDirtySeed`: skip the pre-deliver tracked-clean seed check. This bypasses the precondition only; later Git steps can still fail when tracked edits overlap.
 - `resume`: resume a previously interrupted or conflict-marked delivery.
 
 ## Usage
@@ -185,11 +187,13 @@ Parameters:
 - `--copy-profile <profile>`: choose a bootstrap copy profile from `.mwt/config.toml`.
 - `--run-bootstrap`: force bootstrap copy even when `bootstrap.enabled = false` in config.
 - `--no-bootstrap`: skip copying allowlisted ignored files such as `.env.local`.
+- `--allow-dirty-seed`: skip the pre-create tracked-clean seed check. This bypasses the precondition only; later Git steps such as worktree creation or fast-forward can still fail when tracked edits overlap.
 
 Example:
 
 ```powershell
 mwt create feature-auth --base main --copy-profile local
+mwt create feature-auth --allow-dirty-seed
 ```
 
 #### `mwt list`
@@ -229,6 +233,7 @@ Parameters:
 - `--target <branch>`: override the configured delivery target branch.
 - `--skip-verify`: skip the configured verify command during delivery. Use when verification was already run before committing.
 - `--allow-dirty-task`: skip the pre-deliver tracked-clean task check.
+- `--allow-dirty-seed`: skip the pre-deliver tracked-clean seed check. This bypasses the precondition only; later Git steps such as the seed fast-forward can still fail when tracked edits overlap.
 - `--resume`: rerun delivery after a previously recorded conflict or interruption.
 
 Example:
@@ -236,6 +241,7 @@ Example:
 ```powershell
 mwt deliver feature-auth --target main --json
 mwt deliver feature-auth --skip-verify --json
+mwt deliver feature-auth --allow-dirty-seed --json
 ```
 
 #### `mwt sync`
@@ -245,11 +251,13 @@ Fast-forward the seed worktree to the configured remote branch.
 Parameters:
 
 - `--base <branch>`: override the configured branch for this sync.
+- `--allow-dirty-seed`: skip the pre-sync tracked-clean seed check. This bypasses the precondition only; the fast-forward step can still fail when tracked edits overlap.
 
 Example:
 
 ```powershell
 mwt sync --base main
+mwt sync --allow-dirty-seed
 ```
 
 #### `mwt drop [<name>]`
