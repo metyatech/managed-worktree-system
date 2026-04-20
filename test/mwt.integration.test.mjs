@@ -267,7 +267,11 @@ test('mwt create initializes submodules from fetched base even when the seed is 
     submoduleRepo,
     'agent-rules-private',
   ]);
-  await runGit(fixture.updateDir, ['add', '.gitmodules', 'agent-rules-private']);
+  await runGit(fixture.updateDir, [
+    'add',
+    '.gitmodules',
+    'agent-rules-private',
+  ]);
   await runGit(fixture.updateDir, [
     '-c',
     'user.name=fixture',
@@ -279,7 +283,10 @@ test('mwt create initializes submodules from fetched base even when the seed is 
   ]);
   await runGit(fixture.updateDir, ['push', 'origin', 'main']);
 
-  assert.equal(await pathExists(path.join(fixture.repoDir, '.gitmodules')), false);
+  assert.equal(
+    await pathExists(path.join(fixture.repoDir, '.gitmodules')),
+    false,
+  );
 
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
   const createResult = await runCli(
@@ -344,6 +351,38 @@ test('programmatic createTaskWorktree supports manager-specific path, branch, an
   assert.equal(marker.createdBy, 'manager');
 });
 
+test('mwt create can bypass the dirty seed guard with --allow-dirty-seed', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+
+  await writeFile(
+    path.join(fixture.repoDir, 'README.md'),
+    '# Dirty seed\n',
+    'utf8',
+  );
+
+  const blockedCreate = await runCli(
+    fixture.repoDir,
+    ['create', 'dirty-create', '--json'],
+    4,
+  );
+  const blockedJson = JSON.parse(blockedCreate.stdout);
+  assert.equal(blockedJson.error.id, 'seed_tracked_dirty');
+
+  const allowedCreate = await runCli(fixture.repoDir, [
+    'create',
+    'dirty-create',
+    '--allow-dirty-seed',
+    '--json',
+  ]);
+  const allowedJson = JSON.parse(allowedCreate.stdout);
+  assert.equal(allowedJson.ok, true);
+  assert.equal(await pathExists(allowedJson.result.worktreePath), true);
+
+  const seedStatus = await runGit(fixture.repoDir, ['status', '--short']);
+  assert.match(seedStatus.stdout, /README\.md/u);
+});
+
 test('mwt sync fails on dirty seed and fast-forwards clean seed after remote update', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
@@ -380,6 +419,53 @@ test('mwt sync fails on dirty seed and fast-forwards clean seed after remote upd
     'utf8',
   );
   assert.equal(readme, '# Updated remotely\n');
+});
+
+test('mwt sync can bypass the dirty seed guard with --allow-dirty-seed when edits do not overlap', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+
+  await writeFile(
+    path.join(fixture.repoDir, 'README.md'),
+    '# Dirty local\n',
+    'utf8',
+  );
+  await writeFile(
+    path.join(fixture.updateDir, 'REMOTE.txt'),
+    'remote update\n',
+    'utf8',
+  );
+  await runGit(fixture.updateDir, ['add', 'REMOTE.txt']);
+  await runGit(fixture.updateDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remote update',
+  ]);
+  await runGit(fixture.updateDir, ['push', 'origin', 'main']);
+
+  const syncResult = await runCli(fixture.repoDir, [
+    'sync',
+    '--allow-dirty-seed',
+    '--json',
+  ]);
+  const syncJson = JSON.parse(syncResult.stdout);
+  assert.equal(syncJson.ok, true);
+
+  const remoteFile = await readFile(
+    path.join(fixture.repoDir, 'REMOTE.txt'),
+    'utf8',
+  );
+  assert.equal(remoteFile, 'remote update\n');
+
+  const readme = await readFile(
+    path.join(fixture.repoDir, 'README.md'),
+    'utf8',
+  );
+  assert.equal(readme, '# Dirty local\n');
 });
 
 test('mwt deliver pushes committed task changes and prune removes delivered worktree', async () => {
@@ -440,6 +526,73 @@ test('mwt deliver pushes committed task changes and prune removes delivered work
     path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
   );
   assert.equal(state.items.length, 0);
+});
+
+test('mwt deliver can bypass the dirty seed guard with --allow-dirty-seed', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'dirty-deliver',
+    '--json',
+  ]);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+
+  await writeFile(path.join(taskPath, 'FEATURE.txt'), 'delivered\n', 'utf8');
+  await runGit(taskPath, ['add', 'FEATURE.txt']);
+  await runGit(taskPath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'deliver feature',
+  ]);
+
+  await writeFile(
+    path.join(fixture.repoDir, 'README.md'),
+    '# Dirty seed\n',
+    'utf8',
+  );
+
+  const blockedDeliver = await runCli(
+    fixture.repoDir,
+    ['deliver', 'dirty-deliver', '--json'],
+    4,
+  );
+  const blockedJson = JSON.parse(blockedDeliver.stdout);
+  assert.equal(blockedJson.error.id, 'seed_tracked_dirty');
+
+  const deliverResult = await runCli(fixture.repoDir, [
+    'deliver',
+    'dirty-deliver',
+    '--allow-dirty-seed',
+    '--json',
+  ]);
+  const deliverJson = JSON.parse(deliverResult.stdout);
+  assert.equal(deliverJson.ok, true);
+
+  const feature = await readFile(
+    path.join(fixture.repoDir, 'FEATURE.txt'),
+    'utf8',
+  );
+  assert.equal(feature, 'delivered\n');
+
+  const seedReadme = await readFile(
+    path.join(fixture.repoDir, 'README.md'),
+    'utf8',
+  );
+  assert.equal(seedReadme, '# Dirty seed\n');
+
+  await runGit(fixture.updateDir, ['pull', '--ff-only', 'origin', 'main']);
+  const remoteFeature = await readFile(
+    path.join(fixture.updateDir, 'FEATURE.txt'),
+    'utf8',
+  );
+  assert.equal(remoteFeature, 'delivered\n');
 });
 
 test('mwt deliver --skip-verify skips verification and still pushes', async () => {

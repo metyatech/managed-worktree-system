@@ -452,7 +452,11 @@ export async function writeLastDeliverState(seedRoot, state) {
   });
 }
 
-export async function assertSeedClean(seedRoot) {
+export async function assertSeedClean(seedRoot, options = {}) {
+  if (options.allowDirtySeed) {
+    return;
+  }
+
   if (!(await hasTrackedChanges(seedRoot))) {
     return;
   }
@@ -464,7 +468,7 @@ export async function assertSeedClean(seedRoot) {
     details: {
       changedFiles: await listTrackedChanges(seedRoot),
       recovery:
-        'Move tracked edits into a task worktree or discard them, then rerun the command.',
+        'Move tracked edits into a task worktree or discard them, rerun the command, or use --allow-dirty-seed when you intentionally want to bypass the clean-seed policy guard.',
     },
   });
 }
@@ -842,7 +846,9 @@ export async function planInitializeRepository(seedRoot, options = {}) {
 
 export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
   const config = await loadConfig(seedRoot);
-  await assertSeedClean(seedRoot);
+  await assertSeedClean(seedRoot, {
+    allowDirtySeed: options.allowDirtySeed,
+  });
 
   const baseBranch = options.base ?? config.default_branch;
   const targetBranch = options.target ?? config.default_branch;
@@ -930,7 +936,9 @@ export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
 
 export async function planSyncSeed(seedRoot, options = {}) {
   const config = await loadConfig(seedRoot);
-  await assertSeedClean(seedRoot);
+  await assertSeedClean(seedRoot, {
+    allowDirtySeed: options.allowDirtySeed,
+  });
 
   const branch = options.base ?? config.default_branch;
   return {
@@ -967,7 +975,9 @@ export async function planDeliverTaskWorktree(taskRoot, options = {}) {
 
   const seedRoot = marker.repoRoot;
   const config = await loadConfig(seedRoot);
-  await assertSeedClean(seedRoot);
+  await assertSeedClean(seedRoot, {
+    allowDirtySeed: options.allowDirtySeed,
+  });
   if (!options.allowDirtyTask) {
     await assertTaskClean(taskRoot);
   }
@@ -1030,8 +1040,7 @@ export async function planDeliverTaskWorktree(taskRoot, options = {}) {
     { id: 'run_post_deliver_hooks', description: 'Run post_deliver hooks.' },
     {
       id: 'mark_delivered',
-      description:
-        'Persist last-deliver.json and mark the task as delivered.',
+      description: 'Persist last-deliver.json and mark the task as delivered.',
     },
   ];
 
@@ -1290,7 +1299,9 @@ async function ensureTaskWorktreeSubmodules(worktreePath) {
 
 export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   const config = await loadConfig(seedRoot);
-  await assertSeedClean(seedRoot);
+  await assertSeedClean(seedRoot, {
+    allowDirtySeed: options.allowDirtySeed,
+  });
 
   const baseBranch = options.base ?? config.default_branch;
   const targetBranch = options.target ?? config.default_branch;
@@ -1513,7 +1524,9 @@ export async function listWorktrees(seedRoot, options = {}) {
 
 export async function syncSeed(seedRoot, options = {}) {
   const config = await loadConfig(seedRoot);
-  await assertSeedClean(seedRoot);
+  await assertSeedClean(seedRoot, {
+    allowDirtySeed: options.allowDirtySeed,
+  });
 
   const branch = options.base ?? config.default_branch;
   const remote = config.default_remote;
@@ -1585,7 +1598,9 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
 
   const seedRoot = marker.repoRoot;
   const config = await loadConfig(seedRoot);
-  await assertSeedClean(seedRoot);
+  await assertSeedClean(seedRoot, {
+    allowDirtySeed: options.allowDirtySeed,
+  });
   if (!options.allowDirtyTask) {
     await assertTaskClean(taskRoot);
   }
@@ -1679,7 +1694,9 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
       });
     }
 
-    const verifyResult = await runShell(config.verify.command, { cwd: taskRoot });
+    const verifyResult = await runShell(config.verify.command, {
+      cwd: taskRoot,
+    });
     if (verifyResult.code !== 0) {
       await updateWorktreeStatus(seedRoot, marker.worktreeId, 'active');
       await writeLastDeliverState(seedRoot, {
@@ -1719,7 +1736,10 @@ export async function deliverTaskWorktree(taskRoot, options = {}) {
     });
   }
 
-  const seedSync = await syncSeed(seedRoot, { base: targetBranch });
+  const seedSync = await syncSeed(seedRoot, {
+    base: targetBranch,
+    allowDirtySeed: options.allowDirtySeed,
+  });
   await runHooks(
     seedRoot,
     'post_deliver',
