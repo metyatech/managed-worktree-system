@@ -222,6 +222,28 @@ export async function discoverVerifyCommand(seedRoot) {
   return packageJson?.scripts?.verify ? 'npm run verify' : '';
 }
 
+function buildMissingVerifyCommandError(seedRoot) {
+  return new MwtError({
+    code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+    id: 'init_verify_command_required',
+    message:
+      'mwt init requires a discoverable verify command. Repositories with package.json must define scripts.verify; repositories without package.json must provide a supported scripts/verify.* wrapper.',
+    details: {
+      seedRoot: toPortablePath(seedRoot),
+      supportedWrappers: [
+        'scripts/verify.mjs',
+        'scripts/verify.js',
+        'scripts/verify.cjs',
+        'scripts/verify.ps1',
+        'scripts/verify.cmd',
+        'scripts/verify.sh',
+      ],
+      recovery:
+        'Add scripts.verify to package.json, or remove package.json and add one of the supported scripts/verify.* wrappers before rerunning mwt init.',
+    },
+  });
+}
+
 const INIT_CONFIG_COMMIT_MESSAGE =
   'Initialize managed-worktree-system configuration';
 
@@ -594,6 +616,9 @@ export async function initializeRepository(seedRoot, options = {}) {
   const defaultBranch = options.base ?? (await getCurrentBranch(seedRoot));
   const defaultRemote = options.remote ?? 'origin';
   const verifyCommand = await discoverVerifyCommand(seedRoot);
+  if (!verifyCommand) {
+    throw buildMissingVerifyCommandError(seedRoot);
+  }
 
   await ensureManagedDirs(seedRoot);
   const config = await writeDefaultConfig(seedRoot, {
@@ -900,6 +925,9 @@ export async function planInitializeRepository(seedRoot, options = {}) {
   const defaultBranch = options.base ?? (await getCurrentBranch(seedRoot));
   const defaultRemote = options.remote ?? 'origin';
   const verifyCommand = await discoverVerifyCommand(seedRoot);
+  if (!verifyCommand) {
+    throw buildMissingVerifyCommandError(seedRoot);
+  }
 
   return {
     dryRun: true,
@@ -924,6 +952,10 @@ export async function planInitializeRepository(seedRoot, options = {}) {
           'Write .mwt/config.toml with default branch, remote, and verify command.',
       },
       {
+        id: 'update_local_exclude',
+        description: 'Add managed runtime paths to .git/info/exclude.',
+      },
+      {
         id: 'commit_config',
         description:
           'Create the initial tracked commit for .mwt/config.toml so later create/deliver/sync operations do not depend on an untracked config file.',
@@ -935,10 +967,6 @@ export async function planInitializeRepository(seedRoot, options = {}) {
       {
         id: 'write_seed_state',
         description: 'Write seed.json and initialize worktrees.json.',
-      },
-      {
-        id: 'update_local_exclude',
-        description: 'Add managed runtime paths to .git/info/exclude.',
       },
     ],
   };

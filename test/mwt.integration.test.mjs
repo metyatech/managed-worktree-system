@@ -128,6 +128,94 @@ test('mwt init discovers scripts/verify.mjs when package.json is absent', async 
   assert.equal(initJson.result.config.verify.command, 'node scripts/verify.mjs');
 });
 
+test('mwt init requires scripts.verify when package.json exists', async () => {
+  const fixture = await createRepoWithRemote();
+  const packageJsonPath = path.join(fixture.repoDir, 'package.json');
+  await writeFile(
+    packageJsonPath,
+    JSON.stringify({ name: 'fixture-repo', private: true }, null, 2),
+    'utf8',
+  );
+  await mkdir(path.join(fixture.repoDir, 'scripts'), { recursive: true });
+  await writeFile(
+    path.join(fixture.repoDir, 'scripts', 'verify.mjs'),
+    'process.exit(0);\n',
+    'utf8',
+  );
+  await runGit(fixture.repoDir, ['add', '.']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remove scripts.verify',
+  ]);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  const initResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--json',
+  ], 12);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.error.id, 'init_verify_command_required');
+});
+
+test('mwt init requires a supported verify wrapper when package.json is absent', async () => {
+  const fixture = await createRepoWithRemote();
+  await rm(path.join(fixture.repoDir, 'package.json'), { force: true });
+  await runGit(fixture.repoDir, ['add', '-A']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remove package manifest',
+  ]);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  const initResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--json',
+  ], 12);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.error.id, 'init_verify_command_required');
+});
+
+test('mwt init --dry-run action order matches execute order', async () => {
+  const fixture = await createRepoWithRemote();
+
+  const planResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--dry-run',
+    '--json',
+  ]);
+  const planJson = JSON.parse(planResult.stdout);
+  assert.equal(planJson.ok, true);
+  assert.equal(planJson.result.dryRun, true);
+  assert.deepEqual(
+    planJson.result.actions.map((action) => action.id),
+    [
+      'validate_seed_repo',
+      'create_managed_dirs',
+      'write_config',
+      'update_local_exclude',
+      'commit_config',
+      'write_seed_marker',
+      'write_seed_state',
+    ],
+  );
+});
+
 test('mwt init rejects a linked worktree as the seed', async () => {
   const fixture = await createRepoWithRemote();
   const linkedPath = path.join(fixture.rootDir, 'linked-seed');
