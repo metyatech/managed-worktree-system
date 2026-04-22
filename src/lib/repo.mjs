@@ -36,14 +36,18 @@ import {
   writeText,
 } from './fs.mjs';
 import {
+  addPaths,
   addWorktree,
   branchExists,
+  commitStaged,
   deleteBranch,
   fastForwardBranch,
   fetchBranch,
+  getCommitIdentity,
   getAheadBehind,
   getCurrentBranch,
   getGitDir,
+  getMergeBase,
   getGitPath,
   getHeadCommit,
   getRepoRoot,
@@ -52,11 +56,14 @@ import {
   hasTrackedChanges,
   isBareRepository,
   isBranchMerged,
+  listChangedFiles,
   listTrackedChanges,
   listUntrackedChanges,
   pushHeadToBranch,
   rebaseOnto,
   removeWorktree,
+  stashPop,
+  stashPush,
   updateSubmodules,
   worktreeList,
 } from './git.mjs';
@@ -193,11 +200,60 @@ export function validateConfig(config) {
 export async function discoverVerifyCommand(seedRoot) {
   const packageJsonPath = path.join(seedRoot, 'package.json');
   if (!(await pathExists(packageJsonPath))) {
+    const scriptEntryPoints = [
+      ['scripts/verify.mjs', 'node scripts/verify.mjs'],
+      ['scripts/verify.js', 'node scripts/verify.js'],
+      ['scripts/verify.cjs', 'node scripts/verify.cjs'],
+      ['scripts/verify.ps1', 'pwsh -File scripts/verify.ps1'],
+      ['scripts/verify.cmd', '.\\scripts\\verify.cmd'],
+      ['scripts/verify.sh', 'sh scripts/verify.sh'],
+    ];
+
+    for (const [relativePath, command] of scriptEntryPoints) {
+      if (await pathExists(path.join(seedRoot, relativePath))) {
+        return command;
+      }
+    }
+
     return '';
   }
 
   const packageJson = await readJson(packageJsonPath);
   return packageJson?.scripts?.verify ? 'npm run verify' : '';
+}
+
+const INIT_CONFIG_COMMIT_MESSAGE =
+  'Initialize managed-worktree-system configuration';
+
+async function commitManagedConfig(seedRoot) {
+  const identity = await getCommitIdentity(seedRoot);
+  if (!identity) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_commit_identity_missing',
+      message:
+        'mwt init could not determine a Git commit identity for the initial .mwt/config.toml commit.',
+      details: {
+        recovery:
+          'Configure user.name and user.email or create an initial commit, then rerun mwt init.',
+      },
+    });
+  }
+
+  await addPaths(seedRoot, [MWT_CONFIG_FILE]);
+  const commitResult = await commitStaged(
+    seedRoot,
+    INIT_CONFIG_COMMIT_MESSAGE,
+    identity,
+  );
+  if (commitResult.code !== 0) {
+    throw new MwtError({
+      code: EXIT_CODES.UNSUPPORTED_INIT_STATE,
+      id: 'init_config_commit_failed',
+      message:
+        `mwt init could not commit .mwt/config.toml: ${commitResult.stderr || commitResult.stdout}`.trim(),
+    });
+  }
 }
 
 export function createDefaultConfig({
@@ -546,6 +602,7 @@ export async function initializeRepository(seedRoot, options = {}) {
     verifyCommand,
   });
   await ensureLocalExcludeEntries(seedRoot);
+  await commitManagedConfig(seedRoot);
   const seedMarker = await writeSeedMarker(seedRoot, {
     repoId: options.repoId ?? path.basename(seedRoot),
     defaultBranch,
@@ -758,6 +815,44 @@ export async function copyBootstrapFiles(
   };
 }
 
+async function resolveCreateStartPoint(seedRoot, config, baseBranch) {
+  const remoteStartPoint = `${config.default_remote}/${baseBranch}`;
+  const divergence = await getAheadBehind(seedRoot, baseBranch, remoteStartPoint);
+  if (divergence && divergence.behind === 0) {
+    return {
+      startPoint: baseBranch,
+      startPointSource: 'local',
+    };
+  }
+
+  return {
+    startPoint: remoteStartPoint,
+    startPointSource: 'remote',
+  };
+}
+
+async function canReplayManagedConfigCommit(seedRoot, branch, remote, mergeResult) {
+  if (mergeResult.code === 0) {
+    return false;
+  }
+
+  const divergence = await getAheadBehind(seedRoot, branch, `${remote}/${branch}`);
+  if (!divergence || divergence.ahead === 0 || divergence.behind === 0) {
+    return false;
+  }
+
+  const mergeBase = await getMergeBase(seedRoot, branch, `${remote}/${branch}`);
+  if (!mergeBase) {
+    return false;
+  }
+
+  const localOnlyFiles = await listChangedFiles(seedRoot, mergeBase, branch);
+  return (
+    localOnlyFiles.length > 0 &&
+    localOnlyFiles.every((relativePath) => relativePath === MWT_CONFIG_FILE)
+  );
+}
+
 export async function planInitializeRepository(seedRoot, options = {}) {
   const managedPaths = getManagedPaths(seedRoot);
   if (await pathExists(managedPaths.configPath)) {
@@ -827,6 +922,11 @@ export async function planInitializeRepository(seedRoot, options = {}) {
         id: 'write_config',
         description:
           'Write .mwt/config.toml with default branch, remote, and verify command.',
+      },
+      {
+        id: 'commit_config',
+        description:
+          'Create the initial tracked commit for .mwt/config.toml so later create/deliver/sync operations do not depend on an untracked config file.',
       },
       {
         id: 'write_seed_marker',
@@ -906,7 +1006,7 @@ export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
       },
       {
         id: 'add_worktree',
-        description: `Create branch ${branch} and sibling worktree ${toPortablePath(worktreePath)}.`,
+        description: `Create branch ${branch} and sibling worktree ${toPortablePath(worktreePath)} from the latest safe base (local ${baseBranch} when it already contains seed-only commits, otherwise ${config.default_remote}/${baseBranch}).`,
       },
       {
         id: 'update_submodules',
@@ -1332,11 +1432,12 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   }
 
   await fetchBranch(seedRoot, config.default_remote, baseBranch);
+  const startPoint = await resolveCreateStartPoint(seedRoot, config, baseBranch);
   const addResult = await addWorktree(
     seedRoot,
     worktreePath,
     branch,
-    `${config.default_remote}/${baseBranch}`,
+    startPoint.startPoint,
   );
   if (addResult.code !== 0) {
     throw new MwtError({
@@ -1524,6 +1625,9 @@ export async function listWorktrees(seedRoot, options = {}) {
 
 export async function syncSeed(seedRoot, options = {}) {
   const config = await loadConfig(seedRoot);
+  const seedHadDirtyTracked = options.allowDirtySeed
+    ? await hasTrackedChanges(seedRoot)
+    : false;
   await assertSeedClean(seedRoot, {
     allowDirtySeed: options.allowDirtySeed,
   });
@@ -1536,12 +1640,62 @@ export async function syncSeed(seedRoot, options = {}) {
   await fetchBranch(seedRoot, remote, branch);
   const mergeResult = await fastForwardBranch(seedRoot, remote, branch);
   if (mergeResult.code !== 0) {
-    throw new MwtError({
-      code: EXIT_CODES.REMOTE_SYNC_FAILURE,
-      id: 'seed_fast_forward_failed',
-      message:
-        `Seed worktree could not be fast-forwarded: ${mergeResult.stderr || mergeResult.stdout}`.trim(),
-    });
+    const canReplayManagedConfig = await canReplayManagedConfigCommit(
+      seedRoot,
+      branch,
+      remote,
+      mergeResult,
+    );
+    if (!canReplayManagedConfig) {
+      throw new MwtError({
+        code: EXIT_CODES.REMOTE_SYNC_FAILURE,
+        id: 'seed_fast_forward_failed',
+        message:
+          `Seed worktree could not be fast-forwarded: ${mergeResult.stderr || mergeResult.stdout}`.trim(),
+      });
+    }
+
+    let stashedDirtySeed = false;
+    if (seedHadDirtyTracked) {
+      const stashResult = await stashPush(
+        seedRoot,
+        'mwt-sync-managed-config-replay',
+      );
+      if (stashResult.code !== 0) {
+        throw new MwtError({
+          code: EXIT_CODES.REMOTE_SYNC_FAILURE,
+          id: 'seed_fast_forward_failed',
+          message:
+            `Seed worktree could not prepare for replaying its managed config commit: ${stashResult.stderr || stashResult.stdout}`.trim(),
+        });
+      }
+      stashedDirtySeed = true;
+    }
+
+    const rebaseResult = await rebaseOnto(seedRoot, remote, branch);
+    if (rebaseResult.code !== 0 || (await hasMergeConflicts(seedRoot))) {
+      if (stashedDirtySeed) {
+        await stashPop(seedRoot);
+      }
+      throw new MwtError({
+        code: EXIT_CODES.REMOTE_SYNC_FAILURE,
+        id: 'seed_fast_forward_failed',
+        message:
+          `Seed worktree could not replay its local managed config commit onto ${remote}/${branch}: ${rebaseResult.stderr || rebaseResult.stdout}`.trim(),
+      });
+    }
+
+    if (stashedDirtySeed) {
+      const restoreResult = await stashPop(seedRoot);
+      if (restoreResult.code !== 0) {
+        throw new MwtError({
+          code: EXIT_CODES.REMOTE_SYNC_FAILURE,
+          id: 'seed_fast_forward_failed',
+          message:
+            `Seed worktree replayed its managed config commit but could not restore the caller's dirty seed changes: ${restoreResult.stderr || restoreResult.stdout}`.trim(),
+        });
+      }
+    }
   }
 
   const after = await getHeadCommit(seedRoot);
@@ -1575,15 +1729,36 @@ export async function findTaskByName(seedRoot, name) {
   const match = state.items.find(
     (item) => item.name === name || item.worktreeId === name,
   );
-  if (!match) {
-    throw new MwtError({
-      code: EXIT_CODES.WORKTREE_NOT_FOUND,
-      id: 'task_not_found',
-      message: `Managed task worktree not found: ${name}`,
-    });
+  if (match) {
+    return match;
   }
 
-  return match;
+  const listed = (await worktreeList(seedRoot)).filter((entry) => !entry.bare);
+  for (const entry of listed) {
+    if (path.resolve(entry.path) === path.resolve(seedRoot)) {
+      continue;
+    }
+
+    const marker = await loadMarker(entry.path);
+    if (
+      marker?.kind === 'task' &&
+      (marker.worktreeName === name || marker.worktreeId === name)
+    ) {
+      return {
+        worktreeId: marker.worktreeId,
+        name: marker.worktreeName,
+        branch: marker.branch,
+        path: marker.worktreePath,
+        status: 'active',
+      };
+    }
+  }
+
+  throw new MwtError({
+    code: EXIT_CODES.WORKTREE_NOT_FOUND,
+    id: 'task_not_found',
+    message: `Managed task worktree not found: ${name}`,
+  });
 }
 
 export async function deliverTaskWorktree(taskRoot, options = {}) {

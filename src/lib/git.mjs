@@ -50,6 +50,55 @@ export async function getHeadCommit(cwd) {
   return result.stdout.trim();
 }
 
+export async function getMergeBase(cwd, refA, refB) {
+  const result = await git(['merge-base', refA, refB], { cwd });
+  if (result.code !== 0) {
+    return null;
+  }
+
+  return result.stdout.trim() || null;
+}
+
+export async function getCommitIdentity(cwd) {
+  const latestCommit = await git(['log', '-1', '--format=%an%n%ae'], { cwd });
+  if (latestCommit.code === 0) {
+    const [name = '', email = ''] = latestCommit.stdout
+      .split(/\r?\n/u)
+      .map((value) => value.trim());
+    if (name && email) {
+      return { name, email };
+    }
+  }
+
+  const configuredName = await git(['config', '--get', 'user.name'], { cwd });
+  const configuredEmail = await git(['config', '--get', 'user.email'], { cwd });
+  if (configuredName.code === 0 && configuredEmail.code === 0) {
+    const name = configuredName.stdout.trim();
+    const email = configuredEmail.stdout.trim();
+    if (name && email) {
+      return { name, email };
+    }
+  }
+
+  return null;
+}
+
+export async function addPaths(cwd, paths) {
+  return gitOk(['add', '--', ...paths], { cwd });
+}
+
+export async function commitStaged(cwd, message, identity) {
+  const args = [];
+  if (identity?.name) {
+    args.push('-c', `user.name=${identity.name}`);
+  }
+  if (identity?.email) {
+    args.push('-c', `user.email=${identity.email}`);
+  }
+  args.push('commit', '-m', message);
+  return git(args, { cwd });
+}
+
 export async function hasTrackedChanges(cwd) {
   const result = await gitOk(
     ['status', '--porcelain', '--untracked-files=no'],
@@ -87,6 +136,16 @@ export async function hasMergeConflicts(cwd) {
   return result.stdout.trim().length > 0;
 }
 
+export async function listChangedFiles(cwd, fromRef, toRef) {
+  const result = await gitOk(['diff', '--name-only', `${fromRef}..${toRef}`], {
+    cwd,
+  });
+  return result.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 export async function fetchBranch(cwd, remote, branch) {
   return gitOk(['fetch', remote, branch], { cwd });
 }
@@ -101,6 +160,14 @@ export async function rebaseOnto(cwd, remote, branch) {
 
 export async function pushHeadToBranch(cwd, remote, branch) {
   return git(['push', remote, `HEAD:${branch}`], { cwd });
+}
+
+export async function stashPush(cwd, message) {
+  return git(['stash', 'push', '--message', message], { cwd });
+}
+
+export async function stashPop(cwd) {
+  return git(['stash', 'pop'], { cwd });
 }
 
 export async function worktreeList(cwd) {

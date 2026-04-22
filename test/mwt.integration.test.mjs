@@ -78,7 +78,14 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
   assert.match(excludeContent, /\.mwt\/logs\//u);
 
   const seedStatus = await runGit(fixture.repoDir, ['status', '--short']);
+  assert.equal(seedStatus.stdout.trim(), '');
   assert.doesNotMatch(seedStatus.stdout, /\.mwt-worktree\.json/u);
+
+  const trackedConfig = await runGit(fixture.repoDir, [
+    'ls-files',
+    '.mwt/config.toml',
+  ]);
+  assert.match(trackedConfig.stdout, /\.mwt\/config\.toml/u);
 
   const doctorResult = await runCli(fixture.repoDir, [
     'doctor',
@@ -87,6 +94,38 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
   ]);
   const doctorJson = JSON.parse(doctorResult.stdout);
   assert.equal(doctorJson.result.issues.length, 0);
+});
+
+test('mwt init discovers scripts/verify.mjs when package.json is absent', async () => {
+  const fixture = await createRepoWithRemote();
+  await rm(path.join(fixture.repoDir, 'package.json'), { force: true });
+  await mkdir(path.join(fixture.repoDir, 'scripts'), { recursive: true });
+  await writeFile(
+    path.join(fixture.repoDir, 'scripts', 'verify.mjs'),
+    'process.exit(0);\n',
+    'utf8',
+  );
+  await runGit(fixture.repoDir, ['add', '.']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'replace verify entrypoint',
+  ]);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  const initResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--json',
+  ]);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.ok, true);
+  assert.equal(initJson.result.config.verify.command, 'node scripts/verify.mjs');
 });
 
 test('mwt init rejects a linked worktree as the seed', async () => {
@@ -667,6 +706,16 @@ test('mwt deliver --skip-verify still delivers even when no verify command is co
   const configContent = await readFile(configPath, 'utf8');
   const stripped = configContent.replace(/\[verify\][\s\S]*?(?=\n\[|$)/u, '');
   await writeFile(configPath, stripped, 'utf8');
+  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remove verify config section',
+  ]);
 
   const createResult = await runCli(fixture.repoDir, [
     'create',
@@ -736,6 +785,43 @@ test('mwt drop removes an active task worktree and deletes its branch', async ()
   assert.equal(branchCheck.stdout.trim(), '');
 });
 
+test('mwt drop resolves a task by marker name even when the registry entry is missing', async () => {
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'drop-from-marker',
+    '--json',
+  ]);
+  const createJson = JSON.parse(createResult.stdout);
+  const taskPath = createJson.result.worktreePath;
+  const taskBranch = createJson.result.branch;
+
+  await writeFile(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+    JSON.stringify({ version: 1, items: [] }, null, 2),
+    'utf8',
+  );
+
+  const dropResult = await runCli(fixture.repoDir, [
+    'drop',
+    'drop-from-marker',
+    '--delete-branch',
+    '--force-branch-delete',
+    '--json',
+  ]);
+  const dropJson = JSON.parse(dropResult.stdout);
+  assert.equal(dropJson.ok, true);
+  assert.equal(await pathExists(taskPath), false);
+
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    taskBranch,
+  ]);
+  assert.equal(branchCheck.stdout.trim(), '');
+});
+
 test('createTaskWorktree rolls back the worktree, directory, branch, and state entry when a post-add step fails', async () => {
   const fixture = await createRepoWithRemote();
   await initializeRepository(fixture.repoDir, {
@@ -755,6 +841,16 @@ test('createTaskWorktree rolls back the worktree, directory, branch, and state e
 always_fails = "exit 1"
 `;
   await writeFile(configPath, withFailingHook, 'utf8');
+  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'add failing post-create hook',
+  ]);
 
   let caught;
   try {
@@ -791,6 +887,16 @@ always_fails = "exit 1"
   // (would fail with `worktree_path_occupied` if the directory was
   // left behind).
   await writeFile(configPath, originalConfig, 'utf8');
+  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remove failing post-create hook',
+  ]);
   const retry = await createTaskWorktree(
     fixture.repoDir,
     'post-create-failure',
@@ -1603,6 +1709,16 @@ test('mwt create --run-bootstrap overrides a disabled bootstrap config', async (
     currentConfig.replace('enabled = true', 'enabled = false'),
     'utf8',
   );
+  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'disable bootstrap by default',
+  ]);
 
   const withoutOverride = await runCli(fixture.repoDir, [
     'create',
@@ -1686,6 +1802,16 @@ test('mwt blocks concurrent state-changing operations with a repository lock', a
     `${currentConfig}\n[hooks.pre_create]\nhold_lock = "node .mwt/hooks/hold-lock.cjs"\n`,
     'utf8',
   );
+  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'add lock-holding pre-create hook',
+  ]);
 
   const readyPath = path.join(fixture.rootDir, 'lock-ready.txt');
   const releasePath = path.join(fixture.rootDir, 'lock-release.txt');
