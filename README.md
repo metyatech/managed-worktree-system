@@ -106,6 +106,8 @@ Programmatic delivery options:
 
 ## Usage
 
+Run `mwt --help` for the first-run command path, shared flags, and the fastest way to jump to command-specific help with `mwt <command> -h`.
+
 Core flow:
 
 1. Initialize an existing repository:

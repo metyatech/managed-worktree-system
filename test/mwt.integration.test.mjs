@@ -139,6 +139,30 @@ test('every CLI subcommand returns command-specific help with -h', async () => {
   }
 });
 
+test('mwt top-level help shows the first-run workflow and shared flags', async () => {
+  const fixture = await createRepoWithRemote();
+
+  const helpResult = await runCli(fixture.repoDir, ['--help']);
+  assert.match(helpResult.stdout, /^mwt - managed Git worktree CLI/mu);
+  assert.match(helpResult.stdout, /^Start here:/mu);
+  assert.match(helpResult.stdout, /mwt init --base main --remote origin/u);
+  assert.match(helpResult.stdout, /mwt create my-task/u);
+  assert.match(helpResult.stdout, /mwt deliver my-task --target main/u);
+  assert.match(helpResult.stdout, /^Global flags:/mu);
+  assert.match(helpResult.stdout, /--json/u);
+  assert.match(helpResult.stdout, /--dry-run/u);
+  assert.match(helpResult.stdout, /mwt create -h/u);
+});
+
+test('mwt unknown command errors point back to top-level help', async () => {
+  const fixture = await createRepoWithRemote();
+
+  const result = await runCli(fixture.repoDir, ['wat', '--json'], 2);
+  const errorJson = JSON.parse(result.stdout);
+  assert.equal(errorJson.error.id, 'unknown_command');
+  assert.match(errorJson.error.message, /mwt --help/u);
+});
+
 test('mwt version subcommand prints the package version', async () => {
   const fixture = await createRepoWithRemote();
   const packageJson = JSON.parse(

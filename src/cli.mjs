@@ -33,6 +33,16 @@ const HELP_TEXT = `${TOOL_NAME} - managed Git worktree CLI
 
 Usage:
   mwt <command> [options]
+  mwt <command> -h
+  mwt --version
+
+Start here:
+  1. Initialize the current repository:
+     mwt init --base main --remote origin
+  2. Create a task worktree:
+     mwt create my-task
+  3. Deliver finished work back to the target branch:
+     mwt deliver my-task --target main
 
 Commands:
   init       Initialize the current normal non-bare repository for managed-worktree-system
@@ -44,6 +54,21 @@ Commands:
   prune      Remove managed task worktrees that are safe to prune
   doctor     Validate and optionally repair managed-worktree metadata
   version    Print the current CLI version
+
+Global flags:
+  --help, -h         Show top-level help or command-specific help
+  --version, -V      Print the current CLI version
+  --json             Emit a single JSON envelope on stdout
+  --output <path>    Also write the JSON envelope to a file
+  --dry-run          Print a non-mutating action plan
+  --yes              Approve hook execution or other guarded automation steps
+  --quiet            Suppress human-readable stderr summaries
+  --verbose, -v      Reserved for future verbose logging
+
+More help:
+  mwt create -h
+  mwt deliver -h
+  mwt doctor -h
 `;
 
 const COMMAND_HELP = {
@@ -163,7 +188,8 @@ function resolveInvocation(args) {
   throw new MwtError({
     code: EXIT_CODES.INVALID_USAGE,
     id: 'unknown_command',
-    message: `Unknown command: ${args[0]}`,
+    message:
+      `Unknown command: ${args[0]}. Run 'mwt --help' to see the available commands and first-run workflow.`,
     details: {
       supportedCommands: SUPPORTED_COMMANDS,
     },
