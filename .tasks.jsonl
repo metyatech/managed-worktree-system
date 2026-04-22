@@ -17,3 +17,4 @@
 {"id":"mHuX0ugx","description":"Allow dirty-seed override for create/sync/deliver","stage":"committed","createdAt":"2026-04-20T11:32:20.936Z","updatedAt":"2026-04-20T11:52:41.036Z","committedEventId":"V6imNi87jzCWEL_U"}
 {"id":"GaLVyPKc","description":"Improve managed-worktree-system CLI first-run discoverability from --help","stage":"committed","createdAt":"2026-04-22T01:45:26.867Z","updatedAt":"2026-04-22T02:11:56.793Z","committedEventId":"jgPIy51155o3Bca2"}
 {"id":"g3_5KxSb","description":"Fix mwt init verify config handling and cleanup behavior","stage":"committed","createdAt":"2026-04-22T05:29:32.901Z","updatedAt":"2026-04-22T06:08:59.086Z","committedEventId":"kgFJnYrDECFQllTi"}
+{"id":"Jvx_FF_K","description":"Require explicit verify discovery at init and narrow docs to declared verify policy","stage":"committed","createdAt":"2026-04-22T07:22:13.352Z","updatedAt":"2026-04-22T11:28:53.384Z","committedEventId":"f5uI0ehWhuvg0Kpq"}
