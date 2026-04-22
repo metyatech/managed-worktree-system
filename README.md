@@ -23,7 +23,7 @@
 
 - Start from a normal non-bare repository checkout that you want to keep as the seed.
 - Confirm there are no active task worktrees you still need from the old 1.x layout.
-- Run `mwt init` in the normal repository checkout.
+- Run `mwt init` in the normal repository checkout. `mwt init` creates and commits the initial tracked `.mwt/config.toml` so later managed operations do not depend on an untracked config file.
 - Recreate task worktrees from that seed with `mwt create`.
 
 ## Supported environments
@@ -161,6 +161,8 @@ If you prefer not to install globally, replace `mwt` with `npm exec -- mwt` insi
 #### `mwt init`
 
 Initialize the current normal non-bare repository for managed worktree operation.
+
+`mwt init` creates and commits the initial tracked `.mwt/config.toml`. The verify command is auto-detected from `package.json` (`npm run verify`) or common repo-local wrappers such as `scripts/verify.mjs`.
 
 Parameters:
 

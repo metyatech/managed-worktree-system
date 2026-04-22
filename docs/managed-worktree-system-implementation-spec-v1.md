@@ -77,6 +77,7 @@ v1 MUST satisfy these invariants:
 - one canonical Git store: the seed repository's normal `.git/`
 - one seed worktree: repository root
 - all tracked edits happen only in task worktrees
+- `.mwt/config.toml` is versioned repository state, not local-only runtime state
 - task worktrees are siblings of the seed worktree
 - seed worktree tracked changes block `create`, `deliver`, and `sync` unless `--allow-dirty-seed` is supplied; the flag disables the precondition check only — later Git steps such as fast-forward or worktree update can still fail when tracked edits overlap
 - task delivery rebases onto the remote target, verifies, pushes, then fast-forwards the seed
