@@ -533,17 +533,20 @@ Preconditions:
 - repository root is a normal Git repository
 - no Git rebase/merge/cherry-pick is in progress
 - no linked worktree already occupies the root in an unsupported layout
+- a verify command is discoverable for initialization: `package.json` repositories must declare `scripts.verify`; repositories without `package.json` must provide a supported `scripts/verify.*` wrapper
 
 Behavior:
 
 1. Resolve current default branch and remote.
 2. Verify root tracked files are clean unless `--force` is supplied.
 3. Verify the repository is a normal non-bare primary checkout.
-4. Create `.mwt/` directories.
-5. Create `.mwt/config.toml` if absent.
-6. Create the seed `.mwt-worktree.json`.
-7. Create ignored state/log paths and update local Git exclude rules if required.
-8. Record `seed.json`.
+4. Discover the verify command according to the init policy: prefer explicit `scripts.verify` when `package.json` exists; otherwise allow only supported `scripts/verify.*` wrappers.
+5. Fail with exit code `12` if no verify command is discoverable.
+6. Create `.mwt/` directories.
+7. Create `.mwt/config.toml` if absent.
+8. Create the seed `.mwt-worktree.json`.
+9. Create ignored state/log paths and update local Git exclude rules if required.
+10. Record `seed.json`.
 
 Failure rule:
 
@@ -664,10 +667,13 @@ Validation occurs at four layers:
 - repo-standard verify command during `deliver`
 - post-operation state validation in `doctor`
 
-The verify command source of truth is:
+The verify command source of truth is `verify.command` in `.mwt/config.toml`.
 
-1. `verify.command` in `.mwt/config.toml`
-2. otherwise a repository-standard fallback discovered at runtime
+`mwt init` may discover the initial value only under this policy:
+
+1. if `package.json` exists, require `scripts.verify` and record `npm run verify`
+2. if `package.json` does not exist, allow only a supported `scripts/verify.*` wrapper
+3. if neither condition yields a command, fail init with exit code `12`
 
 v1 SHOULD start with explicit config and avoid heuristic fallback where practical.
 

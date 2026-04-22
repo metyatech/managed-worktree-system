@@ -162,7 +162,7 @@ If you prefer not to install globally, replace `mwt` with `npm exec -- mwt` insi
 
 Initialize the current normal non-bare repository for managed worktree operation.
 
-`mwt init` creates and commits the initial tracked `.mwt/config.toml`. The verify command is auto-detected from `package.json` (`npm run verify`) or common repo-local wrappers such as `scripts/verify.mjs`.
+`mwt init` creates and commits the initial tracked `.mwt/config.toml`. If the repository has `package.json`, `mwt init` requires an explicit `scripts.verify` and records `npm run verify`. Only repositories without `package.json` use wrapper fallback such as `scripts/verify.mjs`. If no verify command can be discovered under that policy, `mwt init` fails instead of writing a partial managed setup.
 
 Parameters:
 
