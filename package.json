@@ -61,7 +61,7 @@
   },
   "devDependencies": {
     "compose-agentsmd": "^6.0.0",
-    "eslint": "^9.39.0",
+    "eslint": "^10.2.1",
     "markdownlint-cli": "^0.48.0",
     "prettier": "^3.6.2"
   },
