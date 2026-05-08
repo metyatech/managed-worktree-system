@@ -96,6 +96,14 @@ Programmatic create options:
 - `pathTemplate`: override the configured task worktree path template for this
   call.
 - `branchTemplate`: override the configured task branch template for this call.
+- `allowNonSiblingWorktreePath`: allow this programmatic call's resolved
+  `pathTemplate` to point outside the seed's sibling directory. The path still
+  must not resolve inside the seed worktree. CLI `mwt create` keeps the default
+  sibling-only policy.
+- `reuseExistingBranch`: attach an existing local branch with
+  `git worktree add <path> <branch>` instead of creating a new branch with `-b`.
+  The branch must already exist locally and must not already be checked out in
+  another worktree.
 
 Programmatic delivery options:
 
