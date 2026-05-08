@@ -26,6 +26,14 @@ export interface MwtMarker {
   defaultRemote?: string;
 }
 
+export interface InitializeRepositoryOptions {
+  base?: string;
+  remote?: string;
+  force?: boolean;
+  noVerify?: boolean;
+  repoId?: string;
+}
+
 export interface CreateTaskWorktreeOptions {
   base?: string;
   target?: string;
@@ -141,7 +149,7 @@ export declare function loadMarker(
 ): Promise<MwtMarker | null>;
 export declare function initializeRepository(
   seedRoot: string,
-  options?: Record<string, unknown>,
+  options?: InitializeRepositoryOptions,
 ): Promise<InitResult>;
 export declare function createTaskWorktree(
   seedRoot: string,
@@ -178,7 +186,7 @@ export declare function doctorRepository(
 ): Promise<DoctorResult>;
 export declare function planInitializeRepository(
   seedRoot: string,
-  options?: Record<string, unknown>,
+  options?: InitializeRepositoryOptions,
 ): Promise<Record<string, unknown>>;
 export declare function planCreateTaskWorktree(
   seedRoot: string,

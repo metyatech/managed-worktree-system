@@ -72,8 +72,9 @@ More help:
 `;
 
 const COMMAND_HELP = {
-  init: `Usage: mwt init [--base <branch>] [--remote <name>] [--force] [--json]
+  init: `Usage: mwt init [--base <branch>] [--remote <name>] [--force] [--no-verify] [--json]
 Example: mwt init --base main --remote origin --json
+Example: mwt init --no-verify --json
 `,
   create: `Usage: mwt create <name> [--base <branch>] [--copy-profile <profile>] [--run-bootstrap|--no-bootstrap] [--allow-dirty-seed] [--json]
 Example: mwt create feature-auth --base main --allow-dirty-seed --json
@@ -213,6 +214,7 @@ function parseCommandOptions(command, args) {
       base: { type: 'string' },
       remote: { type: 'string' },
       force: { type: 'boolean' },
+      'no-verify': { type: 'boolean' },
     },
     create: {
       ...shared,
@@ -354,6 +356,7 @@ async function runCommand(command, parsed) {
             base: values.base,
             remote: values.remote,
             force: values.force,
+            noVerify: values['no-verify'],
           })),
           summary: `Planned initialization for ${toPortablePath(repoRoot)}.`,
         },
@@ -364,6 +367,7 @@ async function runCommand(command, parsed) {
       base: values.base,
       remote: values.remote,
       force: values.force,
+      noVerify: values['no-verify'],
     });
     return {
       repoRoot,

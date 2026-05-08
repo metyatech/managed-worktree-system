@@ -162,6 +162,49 @@ test('mwt init requires scripts.verify when package.json exists', async () => {
   ], 12);
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.error.id, 'init_verify_command_required');
+  assert.equal(
+    await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')),
+    false,
+  );
+});
+
+test('mwt init --no-verify writes config without a verify command when discovery fails', async () => {
+  const fixture = await createRepoWithRemote();
+  const packageJsonPath = path.join(fixture.repoDir, 'package.json');
+  await writeFile(
+    packageJsonPath,
+    JSON.stringify({ name: 'fixture-repo', private: true }, null, 2),
+    'utf8',
+  );
+  await runGit(fixture.repoDir, ['add', 'package.json']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remove scripts.verify',
+  ]);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  const initResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--no-verify',
+    '--json',
+  ]);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.ok, true);
+  assert.equal('verify' in initJson.result.config, false);
+
+  const configContent = await readFile(
+    path.join(fixture.repoDir, '.mwt', 'config.toml'),
+    'utf8',
+  );
+  assert.doesNotMatch(configContent, /^\[verify\]/mu);
+  assert.doesNotMatch(configContent, /^command\s*=/mu);
 });
 
 test('mwt init requires a supported verify wrapper when package.json is absent', async () => {
@@ -187,6 +230,52 @@ test('mwt init requires a supported verify wrapper when package.json is absent',
   ], 12);
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.error.id, 'init_verify_command_required');
+  assert.equal(
+    await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')),
+    false,
+  );
+});
+
+test('mwt init --no-verify --dry-run plans config without mutating when discovery fails', async () => {
+  const fixture = await createRepoWithRemote();
+  await rm(path.join(fixture.repoDir, 'package.json'), { force: true });
+  await runGit(fixture.repoDir, ['add', '-A']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'remove package manifest',
+  ]);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  const planResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--no-verify',
+    '--dry-run',
+    '--json',
+  ]);
+  const planJson = JSON.parse(planResult.stdout);
+  assert.equal(planJson.ok, true);
+  assert.equal(planJson.result.dryRun, true);
+  assert.equal(planJson.result.verifyCommand, null);
+  assert.equal(
+    planJson.result.actions.some(
+      (action) =>
+        action.id === 'write_config' &&
+        action.description ===
+          'Write .mwt/config.toml with default branch and remote only.',
+    ),
+    true,
+  );
+  assert.equal(
+    await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')),
+    false,
+  );
 });
 
 test('mwt init --dry-run action order matches execute order', async () => {
@@ -786,15 +875,10 @@ test('mwt deliver --skip-verify skips verification and still pushes', async () =
   assert.equal(seedReadme, '# Fast\n');
 });
 
-test('mwt deliver --skip-verify still delivers even when no verify command is configured', async () => {
+test('mwt deliver requires --skip-verify when init --no-verify leaves no verify command configured', async () => {
   const fixture = await createRepoWithRemote();
-  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
-
-  const configPath = path.join(fixture.repoDir, '.mwt', 'config.toml');
-  const configContent = await readFile(configPath, 'utf8');
-  const stripped = configContent.replace(/\[verify\][\s\S]*?(?=\n\[|$)/u, '');
-  await writeFile(configPath, stripped, 'utf8');
-  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await rm(path.join(fixture.repoDir, 'package.json'), { force: true });
+  await runGit(fixture.repoDir, ['add', '-A']);
   await runGit(fixture.repoDir, [
     '-c',
     'user.name=fixture',
@@ -802,8 +886,23 @@ test('mwt deliver --skip-verify still delivers even when no verify command is co
     'user.email=fixture@example.com',
     'commit',
     '-m',
-    'remove verify config section',
+    'remove package manifest',
   ]);
+  await runGit(fixture.repoDir, ['push', 'origin', 'main']);
+
+  await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--no-verify',
+    '--json',
+  ]);
+
+  const configContent = await readFile(
+    path.join(fixture.repoDir, '.mwt', 'config.toml'),
+    'utf8',
+  );
+  assert.doesNotMatch(configContent, /^\[verify\]/mu);
 
   const createResult = await runCli(fixture.repoDir, [
     'create',
@@ -824,6 +923,14 @@ test('mwt deliver --skip-verify still delivers even when no verify command is co
     '-m',
     'no verify config change',
   ]);
+
+  const blockedDeliver = await runCli(
+    fixture.repoDir,
+    ['deliver', 'no-verify-cfg', '--json'],
+    7,
+  );
+  const blockedJson = JSON.parse(blockedDeliver.stdout);
+  assert.equal(blockedJson.error.id, 'missing_verify_command');
 
   const deliverResult = await runCli(fixture.repoDir, [
     'deliver',

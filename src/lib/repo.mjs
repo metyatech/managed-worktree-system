@@ -239,7 +239,7 @@ function buildMissingVerifyCommandError(seedRoot) {
         'scripts/verify.sh',
       ],
       recovery:
-        'Add scripts.verify to package.json, or remove package.json and add one of the supported scripts/verify.* wrappers before rerunning mwt init.',
+        'Add scripts.verify to package.json, remove package.json and add one of the supported scripts/verify.* wrappers, or rerun mwt init with --no-verify when you intentionally want delivery to require --skip-verify until verify.command is configured.',
     },
   });
 }
@@ -283,7 +283,7 @@ export function createDefaultConfig({
   defaultRemote,
   verifyCommand,
 }) {
-  return {
+  const config = {
     version: TOOL_STATE_VERSION,
     default_branch: defaultBranch,
     default_remote: defaultRemote,
@@ -300,14 +300,19 @@ export function createDefaultConfig({
         },
       },
     },
-    verify: {
-      command: verifyCommand,
-    },
     policy: {
       allow_ignored_seed_changes: true,
       allow_tracked_seed_changes: false,
     },
   };
+
+  if (verifyCommand) {
+    config.verify = {
+      command: verifyCommand,
+    };
+  }
+
+  return config;
 }
 
 export async function writeDefaultConfig(seedRoot, options) {
@@ -615,9 +620,13 @@ export async function initializeRepository(seedRoot, options = {}) {
 
   const defaultBranch = options.base ?? (await getCurrentBranch(seedRoot));
   const defaultRemote = options.remote ?? 'origin';
-  const verifyCommand = await discoverVerifyCommand(seedRoot);
+  const verifyCommand = options.noVerify
+    ? ''
+    : await discoverVerifyCommand(seedRoot);
   if (!verifyCommand) {
-    throw buildMissingVerifyCommandError(seedRoot);
+    if (!options.noVerify) {
+      throw buildMissingVerifyCommandError(seedRoot);
+    }
   }
 
   await ensureManagedDirs(seedRoot);
@@ -924,9 +933,13 @@ export async function planInitializeRepository(seedRoot, options = {}) {
 
   const defaultBranch = options.base ?? (await getCurrentBranch(seedRoot));
   const defaultRemote = options.remote ?? 'origin';
-  const verifyCommand = await discoverVerifyCommand(seedRoot);
+  const verifyCommand = options.noVerify
+    ? ''
+    : await discoverVerifyCommand(seedRoot);
   if (!verifyCommand) {
-    throw buildMissingVerifyCommandError(seedRoot);
+    if (!options.noVerify) {
+      throw buildMissingVerifyCommandError(seedRoot);
+    }
   }
 
   return {
@@ -934,7 +947,7 @@ export async function planInitializeRepository(seedRoot, options = {}) {
     seedRoot: toPortablePath(seedRoot),
     defaultBranch,
     defaultRemote,
-    verifyCommand,
+    verifyCommand: verifyCommand || null,
     actions: [
       {
         id: 'validate_seed_repo',
@@ -948,8 +961,9 @@ export async function planInitializeRepository(seedRoot, options = {}) {
       },
       {
         id: 'write_config',
-        description:
-          'Write .mwt/config.toml with default branch, remote, and verify command.',
+        description: verifyCommand
+          ? 'Write .mwt/config.toml with default branch, remote, and verify command.'
+          : 'Write .mwt/config.toml with default branch and remote only.',
       },
       {
         id: 'update_local_exclude',
