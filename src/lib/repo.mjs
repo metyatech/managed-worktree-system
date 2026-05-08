@@ -56,6 +56,7 @@ import {
   hasTrackedChanges,
   isBareRepository,
   isBranchMerged,
+  localBranchExists,
   listChangedFiles,
   listTrackedChanges,
   listUntrackedChanges,
@@ -348,7 +349,22 @@ export function renderTaskPath(seedRoot, config, slug, shortid) {
   );
 }
 
-export function renderTaskPathFromTemplate(seedRoot, template, slug, shortid) {
+function isPathInside(parentPath, candidatePath) {
+  const relativePath = path.relative(parentPath, candidatePath);
+  return (
+    relativePath.length > 0 &&
+    !relativePath.startsWith('..') &&
+    !path.isAbsolute(relativePath)
+  );
+}
+
+export function renderTaskPathFromTemplate(
+  seedRoot,
+  template,
+  slug,
+  shortid,
+  options = {},
+) {
   const repo = path.basename(seedRoot);
   const seedParent = path.resolve(path.dirname(seedRoot));
   const rendered = renderTemplate(template, {
@@ -360,7 +376,11 @@ export function renderTaskPathFromTemplate(seedRoot, template, slug, shortid) {
   });
 
   const resolved = path.resolve(seedRoot, rendered);
-  if (path.dirname(resolved) !== seedParent) {
+  if (path.dirname(resolved) === seedParent) {
+    return resolved;
+  }
+
+  if (!options.allowNonSiblingWorktreePath) {
     throw new MwtError({
       code: EXIT_CODES.TASK_POLICY_VIOLATION,
       id: 'invalid_worktree_path',
@@ -368,6 +388,19 @@ export function renderTaskPathFromTemplate(seedRoot, template, slug, shortid) {
         'Rendered worktree path must resolve to a sibling of the seed worktree.',
       details: {
         rendered: toPortablePath(resolved),
+      },
+    });
+  }
+
+  if (isPathInside(seedRoot, resolved)) {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'invalid_worktree_path',
+      message:
+        'Rendered worktree path must not resolve inside the seed worktree.',
+      details: {
+        rendered: toPortablePath(resolved),
+        seedRoot: toPortablePath(seedRoot),
       },
     });
   }
@@ -395,6 +428,23 @@ function resolveTaskTemplates(config, options = {}) {
     pathTemplate: options.pathTemplate ?? config.task_worktree_dir_template,
     branchTemplate: options.branchTemplate ?? config.task_branch_template,
   };
+}
+
+async function assertReusableBranch(seedRoot, branch) {
+  if (await localBranchExists(seedRoot, branch)) {
+    return;
+  }
+
+  throw new MwtError({
+    code: EXIT_CODES.TASK_POLICY_VIOLATION,
+    id: 'reuse_branch_not_found',
+    message: `Cannot reuse missing local branch: ${branch}`,
+    details: {
+      branch,
+      recovery:
+        'Create the local branch first or omit reuseExistingBranch so mwt can create a new task branch from the configured base.',
+    },
+  });
 }
 
 export async function ensureManagedDirs(seedRoot) {
@@ -1002,12 +1052,19 @@ export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
     templates.pathTemplate,
     slug,
     previewId,
+    {
+      allowNonSiblingWorktreePath: options.allowNonSiblingWorktreePath,
+    },
   );
   const branch = renderTaskBranchFromTemplate(
     templates.branchTemplate,
     slug,
     previewId,
   );
+
+  if (options.reuseExistingBranch) {
+    await assertReusableBranch(seedRoot, branch);
+  }
 
   if (await pathExists(worktreePath)) {
     throw new MwtError({
@@ -1042,13 +1099,19 @@ export async function planCreateTaskWorktree(seedRoot, taskName, options = {}) {
     bootstrapProfile: bootstrapPlan.profileKey,
     bootstrapCandidates: bootstrapPlan.candidates,
     actions: [
-      {
-        id: 'fetch_base',
-        description: `Fetch ${config.default_remote}/${baseBranch}.`,
-      },
+      ...(options.reuseExistingBranch
+        ? []
+        : [
+            {
+              id: 'fetch_base',
+              description: `Fetch ${config.default_remote}/${baseBranch}.`,
+            },
+          ]),
       {
         id: 'add_worktree',
-        description: `Create branch ${branch} and sibling worktree ${toPortablePath(worktreePath)} from the latest safe base (local ${baseBranch} when it already contains seed-only commits, otherwise ${config.default_remote}/${baseBranch}).`,
+        description: options.reuseExistingBranch
+          ? `Attach existing local branch ${branch} to worktree ${toPortablePath(worktreePath)} without resetting or rebasing it.`
+          : `Create branch ${branch} and worktree ${toPortablePath(worktreePath)} from the latest safe base (local ${baseBranch} when it already contains seed-only commits, otherwise ${config.default_remote}/${baseBranch}).`,
       },
       {
         id: 'update_submodules',
@@ -1217,6 +1280,7 @@ async function rollbackPartialTaskWorktree(
   worktreePath,
   branch,
   shortid,
+  options = {},
 ) {
   const errors = [];
   if (await pathExists(worktreePath).catch(() => false)) {
@@ -1233,7 +1297,7 @@ async function rollbackPartialTaskWorktree(
       errors.push(error);
     }
   }
-  if (branch) {
+  if (branch && options.deleteBranch !== false) {
     try {
       await deleteBranch(seedRoot, branch, true);
     } catch (error) {
@@ -1449,12 +1513,16 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
   const targetBranch = options.target ?? config.default_branch;
   const slug = slugifyName(taskName);
   const shortid = createShortId();
+  const reuseExistingBranch = Boolean(options.reuseExistingBranch);
   const templates = resolveTaskTemplates(config, options);
   const worktreePath = renderTaskPathFromTemplate(
     seedRoot,
     templates.pathTemplate,
     slug,
     shortid,
+    {
+      allowNonSiblingWorktreePath: options.allowNonSiblingWorktreePath,
+    },
   );
   const branch = renderTaskBranchFromTemplate(
     templates.branchTemplate,
@@ -1473,13 +1541,21 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     });
   }
 
-  await fetchBranch(seedRoot, config.default_remote, baseBranch);
-  const startPoint = await resolveCreateStartPoint(seedRoot, config, baseBranch);
+  let startPoint = null;
+  if (reuseExistingBranch) {
+    await assertReusableBranch(seedRoot, branch);
+  } else {
+    await fetchBranch(seedRoot, config.default_remote, baseBranch);
+    startPoint = await resolveCreateStartPoint(seedRoot, config, baseBranch);
+  }
   const addResult = await addWorktree(
     seedRoot,
     worktreePath,
     branch,
-    startPoint.startPoint,
+    startPoint?.startPoint,
+    {
+      reuseExistingBranch,
+    },
   );
   if (addResult.code !== 0) {
     throw new MwtError({
@@ -1590,7 +1666,9 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
       marker,
     };
   } catch (error) {
-    await rollbackPartialTaskWorktree(seedRoot, worktreePath, branch, shortid);
+    await rollbackPartialTaskWorktree(seedRoot, worktreePath, branch, shortid, {
+      deleteBranch: !reuseExistingBranch,
+    });
     throw error;
   }
 }

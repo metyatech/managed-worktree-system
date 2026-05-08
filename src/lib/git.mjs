@@ -207,15 +207,21 @@ export async function worktreeList(cwd) {
   });
 }
 
-export async function addWorktree(cwd, worktreePath, branch, startPoint) {
-  return git([
-    'worktree',
-    'add',
-    worktreePath,
-    '-b',
-    branch,
-    startPoint,
-  ], { cwd });
+export async function addWorktree(
+  cwd,
+  worktreePath,
+  branch,
+  startPoint,
+  options = {},
+) {
+  const args = ['worktree', 'add', worktreePath];
+  if (options.reuseExistingBranch) {
+    args.push(branch);
+  } else {
+    args.push('-b', branch, startPoint);
+  }
+
+  return git(args, { cwd });
 }
 
 export async function updateSubmodules(cwd) {
@@ -242,6 +248,14 @@ export async function branchExists(cwd, branch) {
   }
 
   return result.stdout.trim().length > 0;
+}
+
+export async function localBranchExists(cwd, branch) {
+  const result = await git(
+    ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`],
+    { cwd },
+  );
+  return result.code === 0;
 }
 
 export async function isBranchMerged(cwd, branch, target) {

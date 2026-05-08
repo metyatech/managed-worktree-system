@@ -591,6 +591,112 @@ test('programmatic createTaskWorktree supports manager-specific path, branch, an
   assert.equal(marker.createdBy, 'manager');
 });
 
+test('programmatic createTaskWorktree rejects non-sibling absolute paths by default', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const issueWorkspace = path.join(fixture.rootDir, 'issues', 'MWT-101');
+  const absoluteTemplate = path.join(
+    issueWorkspace,
+    '{{ repo }}-symphony-{{ slug }}-{{ shortid }}',
+  );
+
+  await assert.rejects(
+    createTaskWorktree(fixture.repoDir, 'outside-path-default', {
+      pathTemplate: absoluteTemplate,
+      branchTemplate: 'symphony/{{ slug }}/{{ shortid }}',
+    }),
+    (error) => {
+      assert.equal(error.id, 'invalid_worktree_path');
+      assert.match(error.message, /sibling/u);
+      return true;
+    },
+  );
+});
+
+test('programmatic createTaskWorktree allows opted-in absolute nested paths', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const issueWorkspace = path.join(fixture.rootDir, 'issues', 'MWT-102');
+  await mkdir(issueWorkspace, { recursive: true });
+  const absoluteTemplate = path.join(
+    issueWorkspace,
+    '{{ repo }}-symphony-{{ slug }}-{{ shortid }}',
+  );
+
+  const created = await createTaskWorktree(fixture.repoDir, 'nested-path', {
+    createdBy: 'symphony',
+    pathTemplate: absoluteTemplate,
+    branchTemplate: 'symphony/{{ slug }}/{{ shortid }}',
+    allowNonSiblingWorktreePath: true,
+  });
+
+  assert.equal(
+    path.dirname(path.resolve(created.worktreePath)),
+    path.resolve(issueWorkspace),
+  );
+  assert.equal(await pathExists(created.worktreePath), true);
+
+  const marker = await readJson(
+    path.join(created.worktreePath, MWT_MARKER_FILE),
+  );
+  assert.equal(marker.createdBy, 'symphony');
+});
+
+test('programmatic createTaskWorktree can reuse an existing local branch', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const reusableBranch = 'symphony/reuse-existing';
+  await runGit(fixture.repoDir, ['branch', reusableBranch, 'main']);
+
+  const created = await createTaskWorktree(fixture.repoDir, 'reuse-existing', {
+    branchTemplate: reusableBranch,
+    reuseExistingBranch: true,
+  });
+
+  assert.equal(created.branch, reusableBranch);
+  const currentBranch = await runGit(created.worktreePath, [
+    'branch',
+    '--show-current',
+  ]);
+  assert.equal(currentBranch.stdout, reusableBranch);
+});
+
+test('programmatic createTaskWorktree reports structured failure when reused branch is already checked out', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const reusableBranch = 'symphony/already-checked-out';
+  const holderPath = path.join(fixture.rootDir, 'branch-holder');
+  await runGit(fixture.repoDir, ['branch', reusableBranch, 'main']);
+  await runGit(fixture.repoDir, ['worktree', 'add', holderPath, reusableBranch]);
+
+  await assert.rejects(
+    createTaskWorktree(fixture.repoDir, 'already-checked-out', {
+      branchTemplate: reusableBranch,
+      reuseExistingBranch: true,
+    }),
+    (error) => {
+      assert.equal(error.id, 'worktree_add_failed');
+      return true;
+    },
+  );
+});
+
 test('mwt create can bypass the dirty seed guard with --allow-dirty-seed', async () => {
   const fixture = await createRepoWithRemote();
   await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);

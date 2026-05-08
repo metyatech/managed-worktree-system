@@ -44,6 +44,8 @@ export interface CreateTaskWorktreeOptions {
   createdBy?: string;
   pathTemplate?: string;
   branchTemplate?: string;
+  allowNonSiblingWorktreePath?: boolean;
+  reuseExistingBranch?: boolean;
 }
 
 export interface CreateTaskWorktreeResult {
