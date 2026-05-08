@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.1 - 2026-05-08
+
+- Add programmatic `createTaskWorktree` opt-ins for non-sibling resolved
+  worktree paths and existing local branch reuse, so orchestrators can place
+  task worktrees under external issue workspaces without weakening CLI defaults.
+- Keep reused branches non-destructive by validating the local branch and using
+  `git worktree add <path> <branch>` instead of creating, resetting, or rebasing
+  it.
+
 ## 2.3.0 - 2026-05-08
 
 - Add `mwt init --no-verify` as an init-only opt-out from verify command
