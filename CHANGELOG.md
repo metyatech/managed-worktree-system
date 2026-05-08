@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.3.0 - 2026-05-08
+
+- Add `mwt init --no-verify` as an init-only opt-out from verify command
+  discovery; generated config omits `verify.command`, and `mwt deliver` still
+  requires a configured command unless `--skip-verify` is supplied.
 
 ## 2.2.8 - 2026-04-15
 
