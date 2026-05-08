@@ -279,6 +279,8 @@ Purpose:
 
 - create a new sibling task worktree from the requested base branch
 - bootstrap allowed local files and optional setup commands
+- let orchestrators opt into non-sibling absolute task paths and existing local
+  branch reuse through the programmatic API without changing CLI defaults
 
 Flow:
 
@@ -290,6 +292,12 @@ Flow:
 6. Write `.mwt-worktree.json` into the new worktree.
 7. Copy allowlisted ignored files from the seed worktree.
 8. Run project bootstrap hooks.
+
+The CLI path remains intentionally conservative: `mwt create` creates sibling
+worktrees and new task branches. Programmatic callers that own an external issue
+workspace can opt into a non-sibling resolved path, and callers that already
+own a local branch can opt into `git worktree add <path> <branch>` branch reuse
+without reset or rebase.
 
 ### `mwt deliver`
 

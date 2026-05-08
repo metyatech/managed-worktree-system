@@ -577,6 +577,15 @@ Behavior:
 12. Run `post_create`.
 13. Register the worktree in `worktrees.json`.
 
+Programmatic `createTaskWorktree` follows the same safe defaults. A caller may
+set `allowNonSiblingWorktreePath` to allow that call's resolved `pathTemplate`
+to point outside the seed sibling directory, but the path must still not resolve
+inside the seed worktree. A caller may set `reuseExistingBranch` to attach an
+existing local branch with `git worktree add <path> <branch>` instead of
+creating a new branch with `-b`; this mode verifies the branch exists locally and
+does not reset or rebase it. CLI `mwt create` keeps sibling-path and new-branch
+behavior unless a future explicit CLI/config policy opts into a different mode.
+
 ### `mwt list`
 
 Behavior:
