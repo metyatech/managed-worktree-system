@@ -132,6 +132,7 @@ All commands SHOULD support:
 - `--base <branch>`
 - `--remote <name>`
 - `--force`
+- `--no-verify` — initialize without discovering or writing `verify.command`
 
 #### `mwt create`
 
@@ -533,15 +534,15 @@ Preconditions:
 - repository root is a normal Git repository
 - no Git rebase/merge/cherry-pick is in progress
 - no linked worktree already occupies the root in an unsupported layout
-- a verify command is discoverable for initialization: `package.json` repositories must declare `scripts.verify`; repositories without `package.json` must provide a supported `scripts/verify.*` wrapper
+- unless `--no-verify` is supplied, a verify command is discoverable for initialization: `package.json` repositories must declare `scripts.verify`; repositories without `package.json` must provide a supported `scripts/verify.*` wrapper
 
 Behavior:
 
 1. Resolve current default branch and remote.
 2. Verify root tracked files are clean unless `--force` is supplied.
 3. Verify the repository is a normal non-bare primary checkout.
-4. Discover the verify command according to the init policy: prefer explicit `scripts.verify` when `package.json` exists; otherwise allow only supported `scripts/verify.*` wrappers.
-5. Fail with exit code `12` if no verify command is discoverable.
+4. Unless `--no-verify` is supplied, discover the verify command according to the init policy: prefer explicit `scripts.verify` when `package.json` exists; otherwise allow only supported `scripts/verify.*` wrappers.
+5. Fail with exit code `12` if no verify command is discoverable and `--no-verify` is not supplied.
 6. Create `.mwt/` directories.
 7. Create `.mwt/config.toml` if absent.
 8. Create the seed `.mwt-worktree.json`.
@@ -602,7 +603,7 @@ Behavior:
 4. Rebase task branch onto `origin/<target>`.
 5. If rebase conflicts, set status `conflict`, persist `last-deliver.json`, and exit `8`.
 6. Run `pre_deliver`.
-7. Unless `--skip-verify` is passed, run verify command from config.
+7. Unless `--skip-verify` is passed, run verify command from config; fail with exit code `7` when no `verify.command` is configured.
 8. If verify fails, persist failure and exit `7`.
 9. Push `HEAD:<target>` to the configured remote.
 10. If push is rejected, persist failure and exit `9`.
@@ -671,9 +672,10 @@ The verify command source of truth is `verify.command` in `.mwt/config.toml`.
 
 `mwt init` may discover the initial value only under this policy:
 
-1. if `package.json` exists, require `scripts.verify` and record `npm run verify`
-2. if `package.json` does not exist, allow only a supported `scripts/verify.*` wrapper
-3. if neither condition yields a command, fail init with exit code `12`
+1. if `--no-verify` is supplied, omit `verify.command` from the generated config
+2. if `package.json` exists, require `scripts.verify` and record `npm run verify`
+3. if `package.json` does not exist, allow only a supported `scripts/verify.*` wrapper
+4. if neither condition yields a command and `--no-verify` is not supplied, fail init with exit code `12`
 
 v1 SHOULD start with explicit config and avoid heuristic fallback where practical.
 

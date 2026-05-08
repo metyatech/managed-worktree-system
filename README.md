@@ -162,18 +162,20 @@ If you prefer not to install globally, replace `mwt` with `npm exec -- mwt` insi
 
 Initialize the current normal non-bare repository for managed worktree operation.
 
-`mwt init` creates and commits the initial tracked `.mwt/config.toml`. If the repository has `package.json`, `mwt init` requires an explicit `scripts.verify` and records `npm run verify`. Only repositories without `package.json` use wrapper fallback such as `scripts/verify.mjs`. If no verify command can be discovered under that policy, `mwt init` fails instead of writing a partial managed setup.
+`mwt init` creates and commits the initial tracked `.mwt/config.toml`. If the repository has `package.json`, `mwt init` requires an explicit `scripts.verify` and records `npm run verify`. Only repositories without `package.json` use wrapper fallback such as `scripts/verify.mjs`. If no verify command can be discovered under that policy, plain `mwt init` fails instead of writing a partial managed setup. Use `mwt init --no-verify` only when you intentionally want to initialize without writing `verify.command`; later `mwt deliver` then requires `--skip-verify` until a real `verify.command` is configured.
 
 Parameters:
 
 - `--base <branch>`: default target branch recorded in `.mwt/config.toml`.
 - `--remote <name>`: default remote recorded in `.mwt/config.toml`.
 - `--force`: allow initialization even when tracked files are already dirty.
+- `--no-verify`: initialize without discovering or writing `verify.command`.
 
 Example:
 
 ```powershell
 mwt init --base main --remote origin --json
+mwt init --no-verify --json
 ```
 
 #### `mwt create <name>`
@@ -362,7 +364,7 @@ Project policy lives in `.mwt/config.toml`.
 - `bootstrap.default_profile`: default bootstrap profile name.
 - `bootstrap.profiles.<name>.include`: allowlisted glob patterns to copy from the seed, such as `.env.local`.
 - `bootstrap.profiles.<name>.exclude`: excluded globs inside that profile, such as `node_modules/` or `dist/`.
-- `verify.command`: command that `mwt deliver` runs after rebasing onto the latest target branch.
+- `verify.command`: optional command that `mwt deliver` runs after rebasing onto the latest target branch. If it is absent, `mwt deliver` fails unless `--skip-verify` is supplied.
 - `hooks.pre_create.*`, `hooks.post_create.*`, `hooks.pre_deliver.*`, `hooks.post_deliver.*`: named project hooks for lifecycle automation.
 
 The full schema and examples are documented in [docs/managed-worktree-system-implementation-spec-v1.md](docs/managed-worktree-system-implementation-spec-v1.md).
