@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import { MwtError } from './errors.mjs';
 import { runProcess } from './process.mjs';
 
@@ -97,6 +101,35 @@ export async function commitStaged(cwd, message, identity) {
   }
   args.push('commit', '-m', message);
   return git(args, { cwd });
+}
+
+export async function commitOnlyPaths(cwd, message, identity, paths) {
+  const indexDir = await mkdtemp(path.join(os.tmpdir(), 'mwt-index-'));
+  const indexPath = path.join(indexDir, 'index');
+  const indexEnv = { ...process.env, GIT_INDEX_FILE: indexPath };
+  if (identity?.name) {
+    indexEnv.GIT_AUTHOR_NAME = identity.name;
+    indexEnv.GIT_COMMITTER_NAME = identity.name;
+  }
+  if (identity?.email) {
+    indexEnv.GIT_AUTHOR_EMAIL = identity.email;
+    indexEnv.GIT_COMMITTER_EMAIL = identity.email;
+  }
+  try {
+    await gitOk(['read-tree', 'HEAD'], { cwd, env: indexEnv });
+    await gitOk(['add', '--', ...paths], { cwd, env: indexEnv });
+    const tree = await gitOk(['write-tree'], { cwd, env: indexEnv });
+    const head = await gitOk(['rev-parse', 'HEAD'], { cwd });
+    const commit = await gitOk(
+      ['commit-tree', tree.stdout.trim(), '-p', head.stdout.trim(), '-m', message],
+      { cwd, env: indexEnv },
+    );
+    await gitOk(['update-ref', 'HEAD', commit.stdout.trim()], { cwd });
+    await gitOk(['update-index', '--add', '--', ...paths], { cwd });
+    return { code: 0, stdout: commit.stdout, stderr: '' };
+  } finally {
+    await rm(indexDir, { recursive: true, force: true });
+  }
 }
 
 export async function hasTrackedChanges(cwd) {

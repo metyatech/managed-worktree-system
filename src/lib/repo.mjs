@@ -39,7 +39,7 @@ import {
   addPaths,
   addWorktree,
   branchExists,
-  commitStaged,
+  commitOnlyPaths,
   deleteBranch,
   fastForwardBranch,
   fetchBranch,
@@ -264,10 +264,11 @@ async function commitManagedConfig(seedRoot) {
   }
 
   await addPaths(seedRoot, [MWT_CONFIG_FILE]);
-  const commitResult = await commitStaged(
+  const commitResult = await commitOnlyPaths(
     seedRoot,
     INIT_CONFIG_COMMIT_MESSAGE,
     identity,
+    [MWT_CONFIG_FILE],
   );
   if (commitResult.code !== 0) {
     throw new MwtError({

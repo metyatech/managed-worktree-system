@@ -96,6 +96,56 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
   assert.equal(doctorJson.result.issues.length, 0);
 });
 
+test('mwt init --force commits only managed config while preserving dirty user changes', async () => {
+  const fixture = await createRepoWithRemote();
+  const packageJsonPath = path.join(fixture.repoDir, 'package.json');
+  const readmePath = path.join(fixture.repoDir, 'README.md');
+  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  packageJson.description = 'staged user change';
+  await writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf8');
+  await runGit(fixture.repoDir, ['add', 'package.json']);
+  await writeFile(readmePath, '# Fixture\n\nUnstaged user change.\n', 'utf8');
+
+  const initResult = await runCli(fixture.repoDir, [
+    'init',
+    '--base',
+    'main',
+    '--force',
+    '--json',
+  ]);
+  const initJson = JSON.parse(initResult.stdout);
+  assert.equal(initJson.ok, true);
+
+  const committedFiles = await runGit(fixture.repoDir, [
+    'show',
+    '--name-only',
+    '--format=',
+    'HEAD',
+  ]);
+  assert.deepEqual(committedFiles.stdout.split(/\r?\n/u).filter(Boolean), [
+    '.mwt/config.toml',
+  ]);
+
+  const unstagedFiles = await runGit(fixture.repoDir, ['diff', '--name-only']);
+  assert.deepEqual(unstagedFiles.stdout.split(/\r?\n/u).filter(Boolean), [
+    'README.md',
+  ]);
+  const stagedFiles = await runGit(fixture.repoDir, [
+    'diff',
+    '--cached',
+    '--name-only',
+  ]);
+  assert.deepEqual(stagedFiles.stdout.split(/\r?\n/u).filter(Boolean), [
+    'package.json',
+  ]);
+  assert.equal(
+    await readFile(readmePath, 'utf8'),
+    '# Fixture\n\nUnstaged user change.\n',
+  );
+  const packageJsonAfterInit = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  assert.equal(packageJsonAfterInit.description, 'staged user change');
+});
+
 test('mwt init discovers scripts/verify.mjs when package.json is absent', async () => {
   const fixture = await createRepoWithRemote();
   await rm(path.join(fixture.repoDir, 'package.json'), { force: true });
