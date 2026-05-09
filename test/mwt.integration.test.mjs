@@ -1258,6 +1258,112 @@ always_fails = "exit 1"
   assert.equal(await pathExists(retry.worktreePath), true);
 });
 
+test('createTaskWorktree recovers a stale partial git worktree before retrying creation', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const orphanPath = path.join(fixture.rootDir, 'repo-orphan-retry');
+  const orphanBranch = 'symphony/orphan-retry';
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    orphanPath,
+    '-b',
+    orphanBranch,
+    'origin/main',
+  ]);
+
+  assert.equal(await pathExists(path.join(orphanPath, MWT_MARKER_FILE)), false);
+  let state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
+  assert.equal(state.items.length, 0);
+
+  const created = await createTaskWorktree(fixture.repoDir, 'orphan-retry', {
+    pathTemplate: '{{ seed_parent }}/{{ repo }}-orphan-retry',
+    branchTemplate: orphanBranch,
+  });
+
+  assert.equal(path.resolve(created.worktreePath), path.resolve(orphanPath));
+  assert.equal(created.branch, orphanBranch);
+  assert.equal(await pathExists(path.join(orphanPath, MWT_MARKER_FILE)), true);
+
+  const marker = await readJson(path.join(orphanPath, MWT_MARKER_FILE));
+  assert.equal(marker.kind, 'task');
+  assert.equal(marker.branch, orphanBranch);
+
+  state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].branch, orphanBranch);
+  assert.equal(path.resolve(state.items[0].path), path.resolve(orphanPath));
+});
+
+test('createTaskWorktree does not recover a stale partial git worktree with unique commits', async () => {
+  const fixture = await createRepoWithRemote();
+  await initializeRepository(fixture.repoDir, {
+    base: 'main',
+    remote: 'origin',
+  });
+
+  const orphanPath = path.join(fixture.rootDir, 'repo-orphan-unique');
+  const orphanBranch = 'symphony/orphan-unique';
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    orphanPath,
+    '-b',
+    orphanBranch,
+    'origin/main',
+  ]);
+  await writeFile(path.join(orphanPath, 'UNIQUE.txt'), 'keep me\n', 'utf8');
+  await runGit(orphanPath, ['add', 'UNIQUE.txt']);
+  await runGit(orphanPath, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'unique orphan change',
+  ]);
+
+  await assert.rejects(
+    createTaskWorktree(fixture.repoDir, 'orphan-unique', {
+      pathTemplate: '{{ seed_parent }}/{{ repo }}-orphan-unique',
+      branchTemplate: orphanBranch,
+    }),
+    (error) => {
+      assert.equal(error.id, 'worktree_path_occupied');
+      assert.equal(error.details.reason, 'branch_has_unique_commits');
+      assert.equal(error.details.ahead, 1);
+      return true;
+    },
+  );
+
+  assert.equal(await pathExists(orphanPath), true);
+  assert.equal(await pathExists(path.join(orphanPath, MWT_MARKER_FILE)), false);
+
+  const branchCheck = await runGit(fixture.repoDir, [
+    'branch',
+    '--list',
+    orphanBranch,
+  ]);
+  assert.match(
+    branchCheck.stdout,
+    new RegExp(orphanBranch.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+  );
+
+  const state = await readJson(
+    path.join(fixture.repoDir, '.mwt', 'state', 'worktrees.json'),
+  );
+  assert.equal(state.items.length, 0);
+});
+
 test('programmatic dropTaskWorktree removes an active manager task worktree and deletes its branch', async () => {
   const fixture = await createRepoWithRemote();
   await initializeRepository(fixture.repoDir, {

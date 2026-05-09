@@ -1321,6 +1321,156 @@ async function rollbackPartialTaskWorktree(
   }
 }
 
+function worktreePathOccupiedError(worktreePath, details = {}) {
+  return new MwtError({
+    code: EXIT_CODES.TASK_POLICY_VIOLATION,
+    id: 'worktree_path_occupied',
+    message: 'Target worktree path is already occupied.',
+    details: {
+      worktreePath: toPortablePath(worktreePath),
+      ...details,
+    },
+  });
+}
+
+function pathMatches(leftPath, rightPath) {
+  return path.resolve(leftPath) === path.resolve(rightPath);
+}
+
+async function getWorktreeEntryByPath(seedRoot, worktreePath) {
+  const entries = await worktreeList(seedRoot);
+  return (
+    entries
+      .filter((entry) => !entry.bare)
+      .find((entry) => pathMatches(entry.path, worktreePath)) ?? null
+  );
+}
+
+async function getStalePartialTaskWorktreeRecovery(seedRoot, input) {
+  const markerPath = path.join(input.worktreePath, MWT_MARKER_FILE);
+  if (await pathExists(markerPath)) {
+    return {
+      safe: false,
+      reason: 'managed_marker_present',
+    };
+  }
+
+  const entry = await getWorktreeEntryByPath(seedRoot, input.worktreePath);
+  if (!entry) {
+    return {
+      safe: false,
+      reason: 'path_not_git_worktree',
+    };
+  }
+
+  if (entry.branch !== input.branch) {
+    return {
+      safe: false,
+      reason: 'branch_mismatch',
+      actualBranch: entry.branch,
+    };
+  }
+
+  const state = await readWorktreeState(seedRoot);
+  const registered = state.items.some(
+    (item) =>
+      item.branch === input.branch ||
+      (item.path && pathMatches(item.path, input.worktreePath)),
+  );
+  if (registered) {
+    return {
+      safe: false,
+      reason: 'registry_entry_present',
+    };
+  }
+
+  if (await hasTrackedChanges(input.worktreePath)) {
+    return {
+      safe: false,
+      reason: 'worktree_tracked_dirty',
+    };
+  }
+
+  const untrackedChanges = await listUntrackedChanges(input.worktreePath);
+  if (untrackedChanges.length > 0) {
+    return {
+      safe: false,
+      reason: 'worktree_untracked_changes',
+      untrackedChanges,
+    };
+  }
+
+  const divergence = await getAheadBehind(
+    seedRoot,
+    input.branch,
+    input.baseRef,
+  );
+  if (!divergence) {
+    return {
+      safe: false,
+      reason: 'branch_divergence_unknown',
+    };
+  }
+
+  if (divergence.ahead !== 0) {
+    return {
+      safe: false,
+      reason: 'branch_has_unique_commits',
+      ahead: divergence.ahead,
+    };
+  }
+
+  return {
+    safe: true,
+    reason: 'stale_partial_task_worktree',
+    ahead: divergence.ahead,
+    behind: divergence.behind,
+  };
+}
+
+async function rollbackStalePartialTaskWorktreeBeforeCreate(seedRoot, input) {
+  const recovery = await getStalePartialTaskWorktreeRecovery(seedRoot, input);
+  if (!recovery.safe) {
+    throw worktreePathOccupiedError(input.worktreePath, {
+      reason: recovery.reason,
+      branch: input.branch,
+      actualBranch: recovery.actualBranch,
+      ahead: recovery.ahead,
+      untrackedChanges: recovery.untrackedChanges,
+    });
+  }
+
+  await rollbackPartialTaskWorktree(
+    seedRoot,
+    input.worktreePath,
+    input.branch,
+    null,
+    {
+      deleteBranch: input.deleteBranch !== false,
+    },
+  );
+
+  const pathStillExists = await pathExists(input.worktreePath);
+  const branchStillExists =
+    input.deleteBranch === false
+      ? false
+      : await branchExists(seedRoot, input.branch);
+  if (pathStillExists || branchStillExists) {
+    throw new MwtError({
+      code: EXIT_CODES.TASK_POLICY_VIOLATION,
+      id: 'stale_partial_worktree_rollback_failed',
+      message:
+        'Stale partial task worktree recovery did not fully clean the occupied path and branch.',
+      details: {
+        worktreePath: toPortablePath(input.worktreePath),
+        branch: input.branch,
+        pathStillExists,
+        branchStillExists,
+      },
+    });
+  }
+}
+
 function formatCleanupFailureMessage(value, fallback) {
   if (value instanceof Error) {
     return value.message;
@@ -1364,7 +1514,7 @@ async function isLiveGitWorktree(seedRoot, worktreePath) {
   const listed = await worktreeList(seedRoot);
   return listed
     .filter((entry) => !entry.bare)
-    .some((entry) => path.resolve(entry.path) === path.resolve(worktreePath));
+    .some((entry) => pathMatches(entry.path, worktreePath));
 }
 
 async function finalizeTaskCleanup(seedRoot, input) {
@@ -1531,23 +1681,35 @@ export async function createTaskWorktree(seedRoot, taskName, options = {}) {
     shortid,
   );
 
-  if (await pathExists(worktreePath)) {
-    throw new MwtError({
-      code: EXIT_CODES.TASK_POLICY_VIOLATION,
-      id: 'worktree_path_occupied',
-      message: 'Target worktree path is already occupied.',
-      details: {
-        worktreePath: toPortablePath(worktreePath),
-      },
+  let startPoint = null;
+  const resolveStartPointOnce = async () => {
+    if (!startPoint) {
+      await fetchBranch(seedRoot, config.default_remote, baseBranch);
+      startPoint = await resolveCreateStartPoint(seedRoot, config, baseBranch);
+    }
+
+    return startPoint;
+  };
+
+  const worktreePathExists = await pathExists(worktreePath);
+  if (worktreePathExists) {
+    const createStartPoint = reuseExistingBranch
+      ? null
+      : await resolveStartPointOnce();
+    await rollbackStalePartialTaskWorktreeBeforeCreate(seedRoot, {
+      worktreePath,
+      branch,
+      baseRef: createStartPoint?.startPoint ?? baseBranch,
+      deleteBranch: !reuseExistingBranch,
     });
   }
 
-  let startPoint = null;
   if (reuseExistingBranch) {
     await assertReusableBranch(seedRoot, branch);
-  } else {
-    await fetchBranch(seedRoot, config.default_remote, baseBranch);
-    startPoint = await resolveCreateStartPoint(seedRoot, config, baseBranch);
+  }
+
+  if (!reuseExistingBranch) {
+    await resolveStartPointOnce();
   }
   const addResult = await addWorktree(
     seedRoot,
