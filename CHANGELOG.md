@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.2 - 2026-05-10
 
 - Use short physical task worktree paths by default on Windows and shorten
   existing generated default templates during create, while keeping the task
