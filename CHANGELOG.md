@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Use short physical task worktree paths by default on Windows and shorten
+  existing generated default templates during create, while keeping the task
+  name in branch names and `.mwt-worktree.json`.
+
 ## 2.3.1 - 2026-05-08
 
 - Add programmatic `createTaskWorktree` opt-ins for non-sibling resolved
@@ -28,9 +34,9 @@
 ## 2.2.7 - 2026-04-15
 
 - Retry Windows worktree-directory removal when transient `EBUSY`, `EPERM`, or
-  `ENOTEMPTY` cleanup races occur, so `mwt doctor --fix`, `mwt doctor --deep
-  --fix`, and related cleanup flows can usually finish without leaving behind
-  empty orphan directories.
+  `ENOTEMPTY` cleanup races occur, so related cleanup flows such as
+  `mwt doctor --fix` and `mwt doctor --deep --fix` can usually finish without
+  leaving behind empty orphan directories.
 - Keep stale registry entries when a cleanup path still exists after retries are
   exhausted, so a normal later `mwt doctor --fix` run can see and finish the
   recovery instead of degrading the residue into a deep-only orphan sibling.

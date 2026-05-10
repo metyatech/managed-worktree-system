@@ -319,6 +319,14 @@ Required top-level keys:
 - `bootstrap`
 - `policy`
 
+On Windows, new configs use
+`{{ seed_parent }}/{{ repo }}-wt-{{ shortid }}` for
+`task_worktree_dir_template` so dependency installers stay below legacy path
+limits. Existing configs that still contain the old generated default with
+`{{ slug }}` are shortened to that Windows-safe template at create time.
+Custom path templates are treated as explicit operator intent and are not
+rewritten.
+
 ## Schema: `.mwt-worktree.json`
 
 This file exists in every managed worktree.
@@ -566,7 +574,9 @@ Behavior:
 1. Load `.mwt/config.toml`.
 2. Fetch `origin/<base>`.
 3. Generate `slug` and `shortid`.
-4. Render `task_worktree_dir_template`.
+4. Resolve the task path template. On Windows, replace the old generated
+   default path template with the Windows-safe short template. Then render the
+   selected template.
 5. Refuse creation if the target path is occupied by a non-managed directory.
 6. Create branch from `origin/<base>`.
 7. Add sibling worktree.

@@ -99,6 +99,18 @@ export function createShortId() {
   return randomBytes(4).toString('hex');
 }
 
+export const DEFAULT_TASK_WORKTREE_DIR_TEMPLATE =
+  '{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shortid }}';
+
+export const WINDOWS_SAFE_TASK_WORKTREE_DIR_TEMPLATE =
+  '{{ seed_parent }}/{{ repo }}-wt-{{ shortid }}';
+
+export function defaultTaskWorktreeDirTemplate(platform = process.platform) {
+  return platform === 'win32'
+    ? WINDOWS_SAFE_TASK_WORKTREE_DIR_TEMPLATE
+    : DEFAULT_TASK_WORKTREE_DIR_TEMPLATE;
+}
+
 export function getManagedPaths(seedRoot) {
   return {
     seedRoot,
@@ -283,14 +295,14 @@ async function commitManagedConfig(seedRoot) {
 export function createDefaultConfig({
   defaultBranch,
   defaultRemote,
+  platform = process.platform,
   verifyCommand,
 }) {
   const config = {
     version: TOOL_STATE_VERSION,
     default_branch: defaultBranch,
     default_remote: defaultRemote,
-    task_worktree_dir_template:
-      '{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shortid }}',
+    task_worktree_dir_template: defaultTaskWorktreeDirTemplate(platform),
     task_branch_template: 'wt/{{ slug }}/{{ shortid }}',
     bootstrap: {
       enabled: true,
@@ -341,10 +353,10 @@ export function renderTemplate(template, values) {
   );
 }
 
-export function renderTaskPath(seedRoot, config, slug, shortid) {
+export function renderTaskPath(seedRoot, config, slug, shortid, options = {}) {
   return renderTaskPathFromTemplate(
     seedRoot,
-    config.task_worktree_dir_template,
+    resolveTaskPathTemplate(config, options),
     slug,
     shortid,
   );
@@ -424,9 +436,24 @@ export function renderTaskBranchFromTemplate(template, slug, shortid) {
   });
 }
 
+export function resolveTaskPathTemplate(config, options = {}) {
+  const configuredTemplate =
+    options.pathTemplate ?? config.task_worktree_dir_template;
+
+  if (
+    !options.pathTemplate &&
+    (options.platform ?? process.platform) === 'win32' &&
+    configuredTemplate === DEFAULT_TASK_WORKTREE_DIR_TEMPLATE
+  ) {
+    return WINDOWS_SAFE_TASK_WORKTREE_DIR_TEMPLATE;
+  }
+
+  return configuredTemplate;
+}
+
 function resolveTaskTemplates(config, options = {}) {
   return {
-    pathTemplate: options.pathTemplate ?? config.task_worktree_dir_template,
+    pathTemplate: resolveTaskPathTemplate(config, options),
     branchTemplate: options.branchTemplate ?? config.task_branch_template,
   };
 }
@@ -902,7 +929,11 @@ export async function copyBootstrapFiles(
 
 async function resolveCreateStartPoint(seedRoot, config, baseBranch) {
   const remoteStartPoint = `${config.default_remote}/${baseBranch}`;
-  const divergence = await getAheadBehind(seedRoot, baseBranch, remoteStartPoint);
+  const divergence = await getAheadBehind(
+    seedRoot,
+    baseBranch,
+    remoteStartPoint,
+  );
   if (divergence && divergence.behind === 0) {
     return {
       startPoint: baseBranch,
@@ -916,12 +947,21 @@ async function resolveCreateStartPoint(seedRoot, config, baseBranch) {
   };
 }
 
-async function canReplayManagedConfigCommit(seedRoot, branch, remote, mergeResult) {
+async function canReplayManagedConfigCommit(
+  seedRoot,
+  branch,
+  remote,
+  mergeResult,
+) {
   if (mergeResult.code === 0) {
     return false;
   }
 
-  const divergence = await getAheadBehind(seedRoot, branch, `${remote}/${branch}`);
+  const divergence = await getAheadBehind(
+    seedRoot,
+    branch,
+    `${remote}/${branch}`,
+  );
   if (!divergence || divergence.ahead === 0 || divergence.behind === 0) {
     return false;
   }

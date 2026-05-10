@@ -1,7 +1,7 @@
 version = 1
 default_branch = "main"
 default_remote = "origin"
-task_worktree_dir_template = "{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shortid }}"
+task_worktree_dir_template = "{{ seed_parent }}/{{ repo }}-wt-{{ shortid }}"
 task_branch_template = "wt/{{ slug }}/{{ shortid }}"
 
 [bootstrap]
@@ -18,4 +18,3 @@ command = "npm run verify"
 [policy]
 allow_ignored_seed_changes = true
 allow_tracked_seed_changes = false
-

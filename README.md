@@ -32,6 +32,9 @@
 - Git and Node.js 22 or later are required
 - npm 11.12.1 or later is recommended for authenticated scoped-package install and `npx` flows
 - the command surface is intended to remain cross-platform where Git behavior permits
+- on Windows, the default task worktree directory uses only `repo` and
+  `shortid` to keep dependency toolchains such as Bun below legacy path-length
+  limits; task names remain visible in branches and `.mwt-worktree.json`
 
 ## Install
 
@@ -94,7 +97,8 @@ Programmatic create options:
 - `allowDirtySeed`: skip the pre-create tracked-clean seed check. This bypasses the precondition only; later Git steps can still fail when tracked edits overlap.
 - `createdBy`: record the logical creator in `.mwt-worktree.json`.
 - `pathTemplate`: override the configured task worktree path template for this
-  call.
+  call. On Windows, overriding this also overrides the short-path default, so
+  use a compact template when the task worktree will install dependencies.
 - `branchTemplate`: override the configured task branch template for this call.
 - `allowNonSiblingWorktreePath`: allow this programmatic call's resolved
   `pathTemplate` to point outside the seed's sibling directory. The path still
@@ -366,7 +370,14 @@ Project policy lives in `.mwt/config.toml`.
 
 - `default_branch`: default base and delivery target branch, usually `main`.
 - `default_remote`: default remote, usually `origin`.
-- `task_worktree_dir_template`: path template for sibling task worktrees. Available tokens are `repo`, `seed_root`, `seed_parent`, `slug`, and `shortid`.
+- `task_worktree_dir_template`: path template for sibling task worktrees.
+  Available tokens are `repo`, `seed_root`, `seed_parent`, `slug`, and
+  `shortid`. New Windows configs default to
+  `{{ seed_parent }}/{{ repo }}-wt-{{ shortid }}`. Existing configs that still
+  use the old generated default
+  `{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shortid }}` are shortened
+  automatically on Windows during `mwt create`; custom templates are left
+  unchanged.
 - `task_branch_template`: local task branch name template. Available tokens are `slug` and `shortid`.
 - `bootstrap.enabled`: default on or off switch for ignored-file bootstrap copy.
 - `bootstrap.default_profile`: default bootstrap profile name.

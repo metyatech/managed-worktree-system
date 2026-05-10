@@ -11,6 +11,7 @@ import {
   deliverTaskWorktree,
   dropTaskWorktree,
   initializeRepository,
+  loadConfig,
   pruneWorktrees,
 } from '../src/index.mjs';
 import {
@@ -23,6 +24,17 @@ import {
   runGit,
   waitForPath,
 } from './helpers.mjs';
+
+const LEGACY_DEFAULT_TASK_TEMPLATE =
+  '{{ seed_parent }}/{{ repo }}-wt-{{ slug }}-{{ shortid }}';
+const WINDOWS_SAFE_TASK_TEMPLATE =
+  '{{ seed_parent }}/{{ repo }}-wt-{{ shortid }}';
+
+function expectedDefaultTaskTemplate() {
+  return process.platform === 'win32'
+    ? WINDOWS_SAFE_TASK_TEMPLATE
+    : LEGACY_DEFAULT_TASK_TEMPLATE;
+}
 
 async function createLocalSubmoduleRepo(rootDir, repoName = 'rules-submodule') {
   const repoDir = path.join(rootDir, repoName);
@@ -63,6 +75,11 @@ test('mwt init keeps the seed as a normal non-bare repo and doctor passes', asyn
     await pathExists(path.join(fixture.repoDir, '.mwt', 'config.toml')),
     true,
   );
+  const config = await loadConfig(fixture.repoDir);
+  assert.equal(
+    config.task_worktree_dir_template,
+    expectedDefaultTaskTemplate(),
+  );
   assert.equal(
     await pathExists(path.join(fixture.repoDir, MWT_MARKER_FILE)),
     true,
@@ -102,7 +119,11 @@ test('mwt init --force commits only managed config while preserving dirty user c
   const readmePath = path.join(fixture.repoDir, 'README.md');
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   packageJson.description = 'staged user change';
-  await writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf8');
+  await writeFile(
+    packageJsonPath,
+    JSON.stringify(packageJson, null, 2),
+    'utf8',
+  );
   await runGit(fixture.repoDir, ['add', 'package.json']);
   await writeFile(readmePath, '# Fixture\n\nUnstaged user change.\n', 'utf8');
 
@@ -142,7 +163,9 @@ test('mwt init --force commits only managed config while preserving dirty user c
     await readFile(readmePath, 'utf8'),
     '# Fixture\n\nUnstaged user change.\n',
   );
-  const packageJsonAfterInit = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  const packageJsonAfterInit = JSON.parse(
+    await readFile(packageJsonPath, 'utf8'),
+  );
   assert.equal(packageJsonAfterInit.description, 'staged user change');
 });
 
@@ -175,7 +198,10 @@ test('mwt init discovers scripts/verify.mjs when package.json is absent', async 
   ]);
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.ok, true);
-  assert.equal(initJson.result.config.verify.command, 'node scripts/verify.mjs');
+  assert.equal(
+    initJson.result.config.verify.command,
+    'node scripts/verify.mjs',
+  );
 });
 
 test('mwt init requires scripts.verify when package.json exists', async () => {
@@ -204,12 +230,11 @@ test('mwt init requires scripts.verify when package.json exists', async () => {
   ]);
   await runGit(fixture.repoDir, ['push', 'origin', 'main']);
 
-  const initResult = await runCli(fixture.repoDir, [
-    'init',
-    '--base',
-    'main',
-    '--json',
-  ], 12);
+  const initResult = await runCli(
+    fixture.repoDir,
+    ['init', '--base', 'main', '--json'],
+    12,
+  );
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.error.id, 'init_verify_command_required');
   assert.equal(
@@ -272,12 +297,11 @@ test('mwt init requires a supported verify wrapper when package.json is absent',
   ]);
   await runGit(fixture.repoDir, ['push', 'origin', 'main']);
 
-  const initResult = await runCli(fixture.repoDir, [
-    'init',
-    '--base',
-    'main',
-    '--json',
-  ], 12);
+  const initResult = await runCli(
+    fixture.repoDir,
+    ['init', '--base', 'main', '--json'],
+    12,
+  );
   const initJson = JSON.parse(initResult.stdout);
   assert.equal(initJson.error.id, 'init_verify_command_required');
   assert.equal(
@@ -450,6 +474,12 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
   ]);
   const createJson = JSON.parse(createResult.stdout);
   const taskPath = createJson.result.worktreePath;
+  assert.match(
+    path.basename(taskPath),
+    process.platform === 'win32'
+      ? /^repo-wt-[0-9a-f]{8}$/u
+      : /^repo-wt-feature-auth-[0-9a-f]{8}$/u,
+  );
   assert.equal(await pathExists(path.join(taskPath, MWT_MARKER_FILE)), true);
   assert.equal(await pathExists(path.join(taskPath, '.env.local')), true);
 
@@ -468,6 +498,57 @@ test('mwt create makes sibling task worktree and copies allowlisted ignored boot
   assert.equal(
     listJson.result.items.some((item) => item.kind === 'task'),
     true,
+  );
+});
+
+test('mwt create shortens the legacy default task path template on Windows', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows-specific path shortening');
+    return;
+  }
+
+  const fixture = await createRepoWithRemote();
+  await runCli(fixture.repoDir, ['init', '--base', 'main', '--json']);
+
+  const configPath = path.join(fixture.repoDir, '.mwt', 'config.toml');
+  const configText = await readFile(configPath, 'utf8');
+  await writeFile(
+    configPath,
+    configText.replace(
+      WINDOWS_SAFE_TASK_TEMPLATE,
+      LEGACY_DEFAULT_TASK_TEMPLATE,
+    ),
+    'utf8',
+  );
+  await runGit(fixture.repoDir, ['add', '.mwt/config.toml']);
+  await runGit(fixture.repoDir, [
+    '-c',
+    'user.name=fixture',
+    '-c',
+    'user.email=fixture@example.com',
+    'commit',
+    '-m',
+    'restore legacy default worktree template',
+  ]);
+
+  const createResult = await runCli(fixture.repoDir, [
+    'create',
+    'this is a very long task name that would make a risky path',
+    '--json',
+  ]);
+  const createJson = JSON.parse(createResult.stdout);
+
+  assert.match(
+    path.basename(createJson.result.worktreePath),
+    /^repo-wt-[0-9a-f]{8}$/u,
+  );
+  assert.equal(
+    createJson.result.worktreeSlug,
+    'this-is-a-very-long-task-name-that-would-make-a-risky-path',
+  );
+  assert.match(
+    createJson.result.branch,
+    /^wt\/this-is-a-very-long-task-name-that-would-make-a-risky-path\/[0-9a-f]{8}$/u,
   );
 });
 
@@ -733,7 +814,12 @@ test('programmatic createTaskWorktree reports structured failure when reused bra
   const reusableBranch = 'symphony/already-checked-out';
   const holderPath = path.join(fixture.rootDir, 'branch-holder');
   await runGit(fixture.repoDir, ['branch', reusableBranch, 'main']);
-  await runGit(fixture.repoDir, ['worktree', 'add', holderPath, reusableBranch]);
+  await runGit(fixture.repoDir, [
+    'worktree',
+    'add',
+    holderPath,
+    reusableBranch,
+  ]);
 
   await assert.rejects(
     createTaskWorktree(fixture.repoDir, 'already-checked-out', {
