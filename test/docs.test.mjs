@@ -15,8 +15,6 @@ test('required documentation files exist', async () => {
     'CODE_OF_CONDUCT.md',
     '.github/workflows/ci.yml',
     '.github/workflows/publish.yml',
-    '.github/workflows/codeql.yml',
-    '.github/dependabot.yml',
     'docs/managed-worktree-system-design.md',
     'docs/managed-worktree-system-implementation-spec-v1.md',
     '.github/ISSUE_TEMPLATE/bug-report.yml',

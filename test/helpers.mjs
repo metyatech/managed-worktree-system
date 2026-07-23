@@ -12,6 +12,13 @@ import { runProcess } from '../src/lib/process.mjs';
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 export const cliPath = path.join(projectRoot, 'src', 'cli.mjs');
 
+const fixtureGitIdentity = {
+  GIT_AUTHOR_NAME: 'fixture',
+  GIT_AUTHOR_EMAIL: 'fixture@example.com',
+  GIT_COMMITTER_NAME: 'fixture',
+  GIT_COMMITTER_EMAIL: 'fixture@example.com',
+};
+
 export async function run(file, args, options = {}) {
   const result = await runProcess(file, args, options);
   return {
@@ -32,7 +39,10 @@ export async function runGit(cwd, args, check = true) {
 export async function runCli(cwd, args, expectCode = 0, options = {}) {
   const result = await run(process.execPath, [cliPath, ...args], {
     cwd,
-    env: options.env,
+    env: {
+      ...fixtureGitIdentity,
+      ...options.env,
+    },
   });
   assert.equal(result.code, expectCode, result.stderr || result.stdout);
   return result;
@@ -51,6 +61,8 @@ export async function createRepoWithRemote() {
   await mkdir(repoDir, { recursive: true });
   await runGit(rootDir, ['init', '--bare', remoteDir]);
   await runGit(repoDir, ['init', '-b', 'main']);
+  await runGit(repoDir, ['config', 'user.name', fixtureGitIdentity.GIT_AUTHOR_NAME]);
+  await runGit(repoDir, ['config', 'user.email', fixtureGitIdentity.GIT_AUTHOR_EMAIL]);
   await writeFile(path.join(repoDir, '.gitignore'), '.env.local\n', 'utf8');
   await writeFile(path.join(repoDir, '.env.local'), 'TOKEN=seed\n', 'utf8');
   await writeFile(path.join(repoDir, 'README.md'), '# Fixture\n', 'utf8');
@@ -72,6 +84,8 @@ export async function createRepoWithRemote() {
   // forces the clone to land on a local branch named `main`, matching
   // what happens implicitly on Windows and keeping CI behaviour stable.
   await runGit(rootDir, ['clone', '--branch', 'main', remoteDir, updateDir]);
+  await runGit(updateDir, ['config', 'user.name', fixtureGitIdentity.GIT_AUTHOR_NAME]);
+  await runGit(updateDir, ['config', 'user.email', fixtureGitIdentity.GIT_AUTHOR_EMAIL]);
   return {
     rootDir,
     remoteDir,
