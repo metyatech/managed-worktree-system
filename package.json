@@ -54,12 +54,11 @@
     "lint": "npm run lint:docs && npm run lint:js",
     "package:check": "npm pack --json --dry-run",
     "test": "node --test",
-    "build": "npm exec -- compose-agentsmd",
+    "build": "compose-agentsmd",
     "verify": "npm run lint && npm run test && npm run package:check && npm run build",
     "format": "npm exec -- prettier --write ."
   },
   "devDependencies": {
-    "compose-agentsmd": "^6.0.0",
     "eslint": "^9.39.0",
     "markdownlint-cli": "^0.48.0",
     "prettier": "^3.6.2"
