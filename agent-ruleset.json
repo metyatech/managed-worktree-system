@@ -1,5 +1,5 @@
 {
-  "source": "github:metyatech/agent-rules@HEAD",
-  "domains": ["node", "agent-tooling"],
+  "sources": ["github:metyatech/agent-rules"],
+  "profile": "node-cli",
   "output": "AGENTS.md"
 }
